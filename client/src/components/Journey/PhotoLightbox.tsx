@@ -10,6 +10,28 @@ interface LightboxPhoto {
   asset_id?: string | null
   owner_id?: number | null
   mediaType?: string | null
+  infoUrl?: string
+}
+
+interface PhotoMetadata {
+  takenAt?: string | null
+  city?: string | null
+  state?: string | null
+  country?: string | null
+  camera?: string | null
+  lens?: string | null
+  focalLength?: string | number | null
+  aperture?: string | number | null
+  shutter?: string | number | null
+  iso?: string | number | null
+  lat?: number | null
+  lng?: number | null
+  orientation?: number | null
+  description?: string | null
+  width?: number | null
+  height?: number | null
+  fileSize?: number | null
+  fileName?: string | null
 }
 
 interface Props {
@@ -23,11 +45,29 @@ export default function PhotoLightbox({ photos, startIndex = 0, onClose }: Props
   const touchStart = useRef<{ x: number; y: number } | null>(null)
 
   const photo = photos[idx]
+  const [metadata, setMetadata] = useState<PhotoMetadata | null>(null)
+  const [metadataLoading, setMetadataLoading] = useState(false)
   const hasPrev = idx > 0
   const hasNext = idx < photos.length - 1
 
   const prev = useCallback(() => { if (hasPrev) setIdx(i => i - 1) }, [hasPrev])
   const next = useCallback(() => { if (hasNext) setIdx(i => i + 1) }, [hasNext])
+
+  useEffect(() => {
+    if (!photo?.infoUrl) {
+      setMetadata(null)
+      setMetadataLoading(false)
+      return
+    }
+    let cancelled = false
+    setMetadataLoading(true)
+    fetch(photo.infoUrl, { credentials: 'include' })
+      .then(response => response.ok ? response.json() as Promise<PhotoMetadata> : Promise.reject(new Error('metadata request failed')))
+      .then(data => { if (!cancelled) setMetadata(data) })
+      .catch(() => { if (!cancelled) setMetadata(null) })
+      .finally(() => { if (!cancelled) setMetadataLoading(false) })
+    return () => { cancelled = true }
+  }, [photo?.id, photo?.infoUrl])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -149,6 +189,38 @@ export default function PhotoLightbox({ photos, startIndex = 0, onClose }: Props
               padding: '6px 14px', borderRadius: 10,
             }}>{photo.caption}</p>
           </div>
+        )}
+
+        {(photo.infoUrl || metadata) && (
+          <details style={{ position: 'absolute', left: 20, bottom: 20, zIndex: 6, width: 'min(320px, calc(100vw - 40px))', color: '#fff' }}>
+            <summary style={{ display: 'inline-block', cursor: 'pointer', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', padding: '7px 11px', borderRadius: 10, fontSize: 12, fontWeight: 600 }}>
+              {metadataLoading ? 'Loading details…' : 'Photo details'}
+            </summary>
+            {metadata && (
+              <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 12, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(12px)', fontSize: 11, lineHeight: 1.45, maxHeight: '42vh', overflowY: 'auto' }}>
+                {[
+                  ['File', metadata.fileName],
+                  ['Taken', metadata.takenAt ? new Date(metadata.takenAt).toLocaleString() : null],
+                  ['Location', [metadata.city, metadata.state, metadata.country].filter(Boolean).join(', ') || null],
+                  ['GPS', Number.isFinite(metadata.lat) && Number.isFinite(metadata.lng) ? `${metadata.lat}, ${metadata.lng}` : null],
+                  ['Camera', metadata.camera],
+                  ['Lens', metadata.lens],
+                  ['Focal length', metadata.focalLength],
+                  ['Aperture', metadata.aperture],
+                  ['Shutter', metadata.shutter],
+                  ['ISO', metadata.iso],
+                  ['Dimensions', metadata.width && metadata.height ? `${metadata.width} × ${metadata.height}` : null],
+                  ['File size', metadata.fileSize ? `${Math.round(metadata.fileSize / 1024)} KB` : null],
+                  ['Description', metadata.description],
+                ].filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
+                  <div key={label} style={{ display: 'flex', gap: 8, marginBottom: 3 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.55)', minWidth: 84 }}>{label}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.9)', overflowWrap: 'anywhere' }}>{String(value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
         )}
       </div>
     </div>

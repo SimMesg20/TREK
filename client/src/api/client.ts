@@ -835,6 +835,9 @@ export const journeyApi = {
 
   // Entries
   listEntries: (id: number) => apiClient.get(`/journeys/${id}/entries`).then(r => r.data),
+  providerMapPhotos: (id: number) => apiClient.get(`/journeys/${id}/provider-photos`).then(r => r.data as { photos: Array<{ id: string; provider: string; takenAt: string | null; mediaType: 'image'; city: string | null; country: string | null; lat: number; lng: number }>; truncated: boolean }),
+  providerPhotoUrl: (journeyId: number, provider: string, assetId: string, kind: 'thumbnail' | 'original' | 'info') =>
+    `/api/journeys/${journeyId}/provider-photos/${encodeURIComponent(provider)}/${encodeURIComponent(assetId)}/${kind}`,
   createEntry: (id: number, data: Record<string, unknown>) => apiClient.post(`/journeys/${id}/entries`, data).then(r => r.data),
   updateEntry: (entryId: number, data: Record<string, unknown>) => apiClient.patch(`/journeys/entries/${entryId}`, data).then(r => r.data),
   deleteEntry: (entryId: number) => apiClient.delete(`/journeys/entries/${entryId}`).then(r => r.data),

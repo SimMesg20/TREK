@@ -13,6 +13,18 @@ export interface MapMarkerItem {
   dayLabel: number
 }
 
+export interface JourneyMapPhotoMarker {
+  id: string
+  provider: string
+  assetId: string
+  lat: number
+  lng: number
+  takenAt?: string | null
+  thumbnailUrl: string
+  originalUrl: string
+  infoUrl: string
+}
+
 export interface JourneyMapHandle {
   highlightMarker: (id: string | null) => void
   focusMarker: (id: string) => void
@@ -38,6 +50,11 @@ interface Props {
   dark?: boolean
   activeMarkerId?: string | null
   onMarkerClick?: (id: string, type?: string) => void
+  photoMarkers?: JourneyMapPhotoMarker[]
+  onPhotoMarkerClick?: (photo: JourneyMapPhotoMarker) => void
+  showProviderPhotos?: boolean
+  onToggleProviderPhotos?: () => void
+  providerPhotosLoading?: boolean
   fullScreen?: boolean
   paddingBottom?: number
 }
@@ -45,7 +62,7 @@ interface Props {
 function buildMarkerItems(entries: MapEntry[]): MapMarkerItem[] {
   const items: MapMarkerItem[] = []
   for (const e of entries) {
-    if (e.lat && e.lng) {
+    if (Number.isFinite(e.lat) && Number.isFinite(e.lng) && e.lat >= -90 && e.lat <= 90 && e.lng >= -180 && e.lng <= 180 && !(e.lat === 0 && e.lng === 0)) {
       items.push({
         id: e.id,
         lat: e.lat,
@@ -64,6 +81,15 @@ function buildMarkerItems(entries: MapEntry[]): MapMarkerItem[] {
 
 const MARKER_W = 28
 const MARKER_H = 36
+const PHOTO_MARKER_SIZE = 42
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+function photoMarkerHtml(photo: JourneyMapPhotoMarker): string {
+  return `<div style="width:${PHOTO_MARKER_SIZE}px;height:${PHOTO_MARKER_SIZE}px;border-radius:50%;overflow:hidden;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);background:#d4d4d8;cursor:pointer"><img src="${escapeHtml(photo.thumbnailUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`
+}
 
 function markerSvg(dayColor: string, dayLabel: number, highlighted: boolean): string {
   const stroke = highlighted ? '#fff' : 'rgba(255,255,255,0.5)'
@@ -85,7 +111,7 @@ function markerSvg(dayColor: string, dayLabel: number, highlighted: boolean): st
 const EMPTY_TRAIL: { lat: number; lng: number }[] = []
 
 const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
-  { entries, trail, height = 220, dark, activeMarkerId, onMarkerClick, fullScreen, paddingBottom },
+  { entries, trail, height = 220, dark, activeMarkerId, onMarkerClick, photoMarkers = [], onPhotoMarkerClick, showProviderPhotos, onToggleProviderPhotos, providerPhotosLoading, fullScreen, paddingBottom },
   ref
 ) {
   const stableTrail = trail || EMPTY_TRAIL
@@ -97,6 +123,8 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
   const highlightedRef = useRef<string | null>(null)
   const onMarkerClickRef = useRef(onMarkerClick)
   onMarkerClickRef.current = onMarkerClick
+  const onPhotoMarkerClickRef = useRef(onPhotoMarkerClick)
+  onPhotoMarkerClickRef.current = onPhotoMarkerClick
 
   const darkRef = useRef(dark)
   darkRef.current = dark
@@ -236,6 +264,26 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       markersRef.current.set(item.id, marker)
     })
 
+    photoMarkers.forEach(photo => {
+      const marker = L.marker([photo.lat, photo.lng], {
+        icon: L.divIcon({
+          className: '',
+          iconSize: [PHOTO_MARKER_SIZE, PHOTO_MARKER_SIZE],
+          iconAnchor: [PHOTO_MARKER_SIZE / 2, PHOTO_MARKER_SIZE / 2],
+          html: photoMarkerHtml(photo),
+        }),
+        zIndexOffset: 200,
+      }).addTo(map)
+      marker.bindTooltip(photo.takenAt ? new Date(photo.takenAt).toLocaleDateString() : 'Photo', {
+        direction: 'top',
+        offset: [0, -PHOTO_MARKER_SIZE / 2],
+        className: 'map-tooltip',
+      })
+      marker.on('click', () => onPhotoMarkerClickRef.current?.(photo))
+      markersRef.current.set(`photo:${photo.provider}:${photo.id}`, marker)
+      allCoords.push([photo.lat, photo.lng])
+    })
+
     // fit bounds
     requestAnimationFrame(() => {
       if (!mapRef.current) return
@@ -259,7 +307,7 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
       mapRef.current = null
       markersRef.current.clear()
     }
-  }, [entries, stableTrail, dark, mapTileUrl, fullScreen, paddingBottom])
+  }, [entries, stableTrail, photoMarkers, dark, mapTileUrl, fullScreen, paddingBottom])
 
   // react to activeMarkerId prop changes — runs after map is built
   useEffect(() => {
@@ -290,6 +338,22 @@ const JourneyMap = forwardRef<JourneyMapHandle, Props>(function JourneyMap(
         ref={containerRef}
         style={{ width: '100%', height: '100%' }}
       />
+      {onToggleProviderPhotos && (
+        <button
+          type="button"
+          aria-pressed={!!showProviderPhotos}
+          onClick={onToggleProviderPhotos}
+          style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 400,
+            border: `1px solid ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.1)'}`,
+            borderRadius: 999, padding: '7px 11px',
+            background: showProviderPhotos ? (dark ? 'rgba(255,255,255,0.92)' : '#18181B') : (dark ? 'rgba(24,24,27,0.78)' : 'rgba(255,255,255,0.92)'),
+            color: showProviderPhotos ? (dark ? '#18181B' : '#fff') : (dark ? '#fff' : '#18181B'),
+            backdropFilter: 'blur(10px)', cursor: 'pointer',
+            fontSize: '12px', fontWeight: 600,
+          }}
+        >{providerPhotosLoading ? 'Loading…' : `Photos${showProviderPhotos ? ' on' : ''}`}</button>
+      )}
       <div style={{ position: 'absolute', bottom: 12, right: 12, zIndex: 400, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <button
           onClick={zoomIn}

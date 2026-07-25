@@ -6,6 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { useSettingsStore } from '../../store/settingsStore'
 import { isStandardFamily, supportsCustom3d, wantsTerrain, addCustom3dBuildings, addTerrainAndSky } from '../Map/mapboxSetup'
 import { MAPBOX_DEFAULT_STYLE, styleForActiveProvider, basemapLanguage, type GlMapProvider } from '../Map/glProviders'
+import type { JourneyMapPhotoMarker } from './JourneyMap'
 
 export interface JourneyMapGLHandle {
   highlightMarker: (id: string | null) => void
@@ -33,6 +34,11 @@ interface Props {
   dark?: boolean
   activeMarkerId?: string | null
   onMarkerClick?: (id: string, type?: string) => void
+  photoMarkers?: JourneyMapPhotoMarker[]
+  onPhotoMarkerClick?: (photo: JourneyMapPhotoMarker) => void
+  showProviderPhotos?: boolean
+  onToggleProviderPhotos?: () => void
+  providerPhotosLoading?: boolean
   fullScreen?: boolean
   paddingBottom?: number
   glProvider?: GlMapProvider
@@ -51,11 +57,12 @@ interface Item {
 
 const MARKER_W = 28
 const MARKER_H = 36
+const PHOTO_MARKER_SIZE = 42
 
 function buildItems(entries: MapEntry[]): Item[] {
   const items: Item[] = []
   for (const e of entries) {
-    if (e.lat && e.lng) {
+    if (Number.isFinite(e.lat) && Number.isFinite(e.lng) && e.lat >= -90 && e.lat <= 90 && e.lng >= -180 && e.lng <= 180 && !(e.lat === 0 && e.lng === 0)) {
       items.push({
         id: e.id,
         lat: e.lat,
@@ -79,6 +86,17 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+function photoMarkerHtml(photo: JourneyMapPhotoMarker): HTMLDivElement {
+  const wrap = document.createElement('div')
+  wrap.style.cssText = `width:${PHOTO_MARKER_SIZE}px;height:${PHOTO_MARKER_SIZE}px;border-radius:50%;overflow:hidden;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);background:#d4d4d8;cursor:pointer;`
+  const image = document.createElement('img')
+  image.src = photo.thumbnailUrl
+  image.alt = ''
+  image.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;'
+  wrap.appendChild(image)
+  return wrap
 }
 
 function formatEntryDate(iso: string): string {
@@ -206,7 +224,7 @@ function markerHtml(dayColor: string, dayLabel: number, highlighted: boolean): H
 const EMPTY_TRAIL: { lat: number; lng: number }[] = []
 
 const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL(
-  { entries, trail, height = 220, dark, activeMarkerId, onMarkerClick, fullScreen, paddingBottom, glProvider = 'mapbox-gl' },
+  { entries, trail, height = 220, dark, activeMarkerId, onMarkerClick, photoMarkers = [], onPhotoMarkerClick, showProviderPhotos, onToggleProviderPhotos, providerPhotosLoading, fullScreen, paddingBottom, glProvider = 'mapbox-gl' },
   ref
 ) {
   const stableTrail = trail || EMPTY_TRAIL
@@ -231,6 +249,8 @@ const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL
   const popupRef = useRef<any | null>(null)
   const onMarkerClickRef = useRef(onMarkerClick)
   onMarkerClickRef.current = onMarkerClick
+  const onPhotoMarkerClickRef = useRef(onPhotoMarkerClick)
+  onPhotoMarkerClickRef.current = onPhotoMarkerClick
   const darkRef = useRef(dark)
   darkRef.current = dark
 
@@ -349,6 +369,7 @@ const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL
 
     const bounds = new gl.LngLatBounds()
     items.forEach(i => bounds.extend([i.lng, i.lat]))
+    photoMarkers.forEach(photo => bounds.extend([photo.lng, photo.lat]))
     stableTrail.forEach(p => bounds.extend([p.lng, p.lat]))
     const hasPoints = items.length > 0 || stableTrail.length > 0
 
@@ -424,6 +445,18 @@ const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL
         markersRef.current.set(item.id, marker)
       })
 
+      photoMarkers.forEach(photo => {
+        const el = photoMarkerHtml(photo)
+        const marker = new gl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([photo.lng, photo.lat])
+          .addTo(map)
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          onPhotoMarkerClickRef.current?.(photo)
+        })
+        markersRef.current.set(`photo:${photo.provider}:${photo.id}`, marker)
+      })
+
       // fit bounds to all points
       if (hasPoints) {
         const pb = paddingBottom || 50
@@ -449,7 +482,7 @@ const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL
       try { map.remove() } catch { /* noop */ }
       mapRef.current = null
     }
-  }, [entries, stableTrail, glProvider, glStyle, mapboxToken, enableMapbox3d, mapboxQuality, fullScreen, paddingBottom])
+  }, [entries, stableTrail, photoMarkers, glProvider, glStyle, mapboxToken, enableMapbox3d, mapboxQuality, fullScreen, paddingBottom])
 
   // external activeMarkerId → highlight + flyTo
   useEffect(() => {
@@ -487,6 +520,22 @@ const JourneyMapGL = forwardRef<JourneyMapGLHandle, Props>(function JourneyMapGL
   return (
     <div style={{ position: 'relative', height: height === 9999 ? '100%' : height, width: '100%', borderRadius: 'inherit', overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {onToggleProviderPhotos && (
+        <button
+          type="button"
+          aria-pressed={!!showProviderPhotos}
+          onClick={onToggleProviderPhotos}
+          style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 400,
+            border: `1px solid ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.1)'}`,
+            borderRadius: 999, padding: '7px 11px',
+            background: showProviderPhotos ? (dark ? 'rgba(255,255,255,0.92)' : '#18181B') : (dark ? 'rgba(24,24,27,0.78)' : 'rgba(255,255,255,0.92)'),
+            color: showProviderPhotos ? (dark ? '#18181B' : '#fff') : (dark ? '#fff' : '#18181B'),
+            backdropFilter: 'blur(10px)', cursor: 'pointer',
+            fontSize: '12px', fontWeight: 600,
+          }}
+        >{providerPhotosLoading ? 'Loading…' : `Photos${showProviderPhotos ? ' on' : ''}`}</button>
+      )}
     </div>
   )
 })

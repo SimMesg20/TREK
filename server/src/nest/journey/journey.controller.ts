@@ -10,6 +10,7 @@ import {
   Patch,
   Post,
   Put,
+  Res,
   UploadedFile,
   UploadedFiles,
   UseGuards,
@@ -20,6 +21,7 @@ import { diskStorage } from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import type { Response } from 'express';
 import type { User } from '../../types';
 import { JourneyService } from './journey.service';
 import { JourneyAddonGuard } from './journey-addon.guard';
@@ -325,6 +327,44 @@ export class JourneyController {
     if (photo.file_path) {
       try { fs.unlinkSync(path.join(__dirname, '../../../uploads', photo.file_path)); } catch { /* file already gone */ }
     }
+  }
+
+  // ── Provider map overlay ────────────────────────────────────────────────
+  // These assets are read-only references to the acting user's connected
+  // provider library. They are intentionally not persisted in TREK.
+  @Get(':id/provider-photos')
+  async providerMapPhotos(@CurrentUser() user: User, @Param('id') id: string) {
+    const result = await this.journey.listProviderMapPhotos(Number(id), user.id);
+    if (!result) throw new HttpException({ error: 'Journey not found' }, 404);
+    return result;
+  }
+
+  @Get(':id/provider-photos/:provider/:assetId/info')
+  async providerPhotoInfo(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Param('provider') provider: string,
+    @Param('assetId') assetId: string,
+  ) {
+    const result = await this.journey.getProviderPhotoInfo(Number(id), user.id, provider, assetId);
+    if (result.error) throw new HttpException({ error: result.error }, result.status || 404);
+    return result.data;
+  }
+
+  @Get(':id/provider-photos/:provider/:assetId/:kind')
+  async providerPhotoAsset(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Param('provider') provider: string,
+    @Param('assetId') assetId: string,
+    @Param('kind') kind: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (kind !== 'thumbnail' && kind !== 'original') {
+      throw new HttpException({ error: 'Invalid asset kind' }, 400);
+    }
+    const result = await this.journey.streamProviderPhoto(res, Number(id), user.id, provider, assetId, kind);
+    if (result) throw new HttpException({ error: result.error }, result.status || 404);
   }
 
   // ── Journeys /:id ───────────────────────────────────────────────────────

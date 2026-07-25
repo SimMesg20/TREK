@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import * as svc from '../../services/journeyService';
 import * as share from '../../services/journeyShareService';
-import { uploadToImmich, streamImmichAsset } from '../../services/memories/immichService';
+import { uploadToImmich, streamImmichAsset, getAssetInfo as getImmichAssetInfo, isValidAssetId } from '../../services/memories/immichService';
+import { getSynologyAssetInfo, streamSynologyAsset } from '../../services/memories/synologyService';
 import { streamPhoto } from '../../services/memories/photoResolverService';
 import { isAddonEnabled } from '../../services/adminService';
 import { ADDON_IDS } from '../../addons';
@@ -30,6 +31,7 @@ export class JourneyService {
   listJourneys(userId: number) { return svc.listJourneys(userId); }
   createJourney(userId: number, data: Parameters<typeof svc.createJourney>[1]) { return svc.createJourney(userId, data); }
   getJourneyFull(id: number, userId: number) { return svc.getJourneyFull(id, userId); }
+  listProviderMapPhotos(id: number, userId: number) { return svc.listJourneyProviderMapPhotos(id, userId); }
   updateJourney(id: number, userId: number, data: Parameters<typeof svc.updateJourney>[2]) { return svc.updateJourney(id, userId, data); }
   deleteJourney(id: number, userId: number) { return svc.deleteJourney(id, userId); }
   getSuggestions(userId: number) { return svc.getSuggestions(userId); }
@@ -90,8 +92,33 @@ export class JourneyService {
   validateShareTokenForAsset(token: string, assetId: string) { return share.validateShareTokenForAsset(token, assetId); }
   streamPhoto(res: Response, ownerId: number, photoId: number, kind: 'thumbnail' | 'original') { return streamPhoto(res, ownerId, photoId, kind); }
   streamImmichAsset(res: Response, userId: number, assetId: string, kind: 'thumbnail' | 'original', ownerId: number) { return streamImmichAsset(res, userId, assetId, kind, ownerId); }
+  async getProviderPhotoInfo(journeyId: number, userId: number, provider: string, assetId: string): Promise<{ data?: unknown; error?: string; status?: number }> {
+    if (!svc.canAccessJourney(journeyId, userId)) return { error: 'Journey not found', status: 404 };
+    if (provider === 'immich') {
+      if (!isValidAssetId(assetId)) return { error: 'Invalid asset ID', status: 400 };
+      return getImmichAssetInfo(userId, assetId, userId);
+    }
+    if (provider === 'synologyphotos') {
+      const result = await getSynologyAssetInfo(userId, assetId, userId);
+      return 'error' in result ? { error: result.error.message, status: result.error.status } : { data: result.data };
+    }
+    return { error: 'Unknown photo provider', status: 400 };
+  }
   async streamSynologyAsset(res: Response, userId: number, ownerId: number, assetId: string, kind: 'thumbnail' | 'original') {
     const { streamSynologyAsset } = await import('../../services/memories/synologyService');
     return streamSynologyAsset(res, userId, ownerId, assetId, kind);
+  }
+  async streamProviderPhoto(res: Response, journeyId: number, userId: number, provider: string, assetId: string, kind: 'thumbnail' | 'original') {
+    if (!svc.canAccessJourney(journeyId, userId)) return { error: 'Journey not found', status: 404 } as const;
+    if (provider === 'immich') {
+      if (!isValidAssetId(assetId)) return { error: 'Invalid asset ID', status: 400 } as const;
+      await streamImmichAsset(res, userId, assetId, kind, userId);
+      return null;
+    }
+    if (provider === 'synologyphotos') {
+      await streamSynologyAsset(res, userId, userId, assetId, kind);
+      return null;
+    }
+    return { error: 'Unknown photo provider', status: 400 } as const;
   }
 }

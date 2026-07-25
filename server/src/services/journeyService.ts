@@ -8,6 +8,8 @@ import {
   setTrekPhotoProvider,
   deleteTrekPhotoIfOrphan,
 } from './memories/photoResolverService';
+import { searchPhotos as searchImmichPhotos } from './memories/immichService';
+import { searchSynologyPhotos } from './memories/synologyService';
 
 function ts(): number {
   return Date.now();
@@ -65,6 +67,108 @@ export function canAccessJourney(journeyId: number, userId: number): Journey | n
     .get(journeyId, userId);
   if (contrib) return (db.prepare('SELECT * FROM journeys WHERE id = ?').get(journeyId) as Journey) || null;
   return null;
+}
+
+export interface JourneyProviderMapPhoto {
+  id: string;
+  provider: 'immich' | 'synologyphotos';
+  takenAt: string | null;
+  mediaType: 'image';
+  city: string | null;
+  country: string | null;
+  lat: number;
+  lng: number;
+}
+
+function isMapCoordinate(lat: unknown, lng: unknown): lat is number {
+  return typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90
+    && typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180
+    && !(lat === 0 && lng === 0);
+}
+
+function journeyPhotoDateRange(journeyId: number): { from?: string; to?: string } {
+  const tripRange = db.prepare(`
+    SELECT MIN(t.start_date) AS from_date, MAX(t.end_date) AS to_date
+    FROM journey_trips jt
+    JOIN trips t ON t.id = jt.trip_id
+    WHERE jt.journey_id = ?
+  `).get(journeyId) as { from_date?: string | null; to_date?: string | null };
+
+  if (tripRange?.from_date || tripRange?.to_date) {
+    return { from: tripRange.from_date || undefined, to: tripRange.to_date || undefined };
+  }
+
+  const entryRange = db.prepare(`
+    SELECT MIN(entry_date) AS from_date, MAX(entry_date) AS to_date
+    FROM journey_entries
+    WHERE journey_id = ? AND entry_date IS NOT NULL
+  `).get(journeyId) as { from_date?: string | null; to_date?: string | null };
+  return { from: entryRange?.from_date || undefined, to: entryRange?.to_date || undefined };
+}
+
+/**
+ * Read-only provider overlay for the Journey map. Assets are deliberately not
+ * persisted: the provider remains the source of truth and the existing proxy
+ * routes keep credentials on the server.
+ */
+export async function listJourneyProviderMapPhotos(journeyId: number, userId: number): Promise<{
+  photos: JourneyProviderMapPhoto[];
+  truncated: boolean;
+} | null> {
+  if (!canAccessJourney(journeyId, userId)) return null;
+
+  const { from, to } = journeyPhotoDateRange(journeyId);
+  const photos: JourneyProviderMapPhoto[] = [];
+  const seen = new Set<string>();
+  let truncated = false;
+  const maxPhotos = 1000;
+
+  const addAssets = (provider: JourneyProviderMapPhoto['provider'], assets: any[]) => {
+    for (const asset of assets) {
+      if (photos.length >= maxPhotos) {
+        truncated = true;
+        return;
+      }
+      const id = typeof asset.id === 'string' ? asset.id : String(asset.id ?? '');
+      if (!id || asset.mediaType === 'video' || !isMapCoordinate(asset.lat, asset.lng)) continue;
+      const key = `${provider}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      photos.push({
+        id,
+        provider,
+        takenAt: typeof asset.takenAt === 'string' ? asset.takenAt : null,
+        mediaType: 'image',
+        city: typeof asset.city === 'string' ? asset.city : null,
+        country: typeof asset.country === 'string' ? asset.country : null,
+        lat: asset.lat,
+        lng: asset.lng,
+      });
+    }
+  };
+
+  // Keep the aggregation bounded. Typical journeys fit in one page, while a
+  // pathological library cannot create thousands of DOM markers in the map.
+  const immichPageSize = 200;
+  for (let page = 1; page <= 5 && photos.length < maxPhotos; page++) {
+    const result = await searchImmichPhotos(userId, from, to, page, immichPageSize);
+    if (result.error) break;
+    addAssets('immich', result.assets || []);
+    if (!result.hasMore) break;
+    if (page === 5) truncated = true;
+  }
+
+  const synologyPageSize = 300;
+  for (let offset = 0; offset < synologyPageSize * 3 && photos.length < maxPhotos; offset += synologyPageSize) {
+    const result = await searchSynologyPhotos(userId, from, to, offset, synologyPageSize);
+    if (!result.success) break;
+    addAssets('synologyphotos', result.data.assets || []);
+    if (!result.data.hasMore) break;
+    if (offset >= synologyPageSize * 2) truncated = true;
+  }
+
+  photos.sort((a, b) => (a.takenAt || '').localeCompare(b.takenAt || ''));
+  return { photos, truncated };
 }
 
 export function isOwner(journeyId: number, userId: number): boolean {

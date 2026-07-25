@@ -9,6 +9,8 @@ import { useToast } from '../../components/shared/Toast'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { JourneyEntry } from '../../store/journeyStore'
 import { createDraftJourneyEntry } from './JourneyDetailPage.helpers'
+import { journeyApi } from '../../api/client'
+import type { JourneyMapPhotoMarker } from '../../components/Journey/JourneyMap'
 
 /**
  * Journey detail page logic — owns the journey load + WebSocket live sync, the
@@ -40,7 +42,7 @@ export function useJourneyDetail() {
   const feedRef = useRef<HTMLDivElement>(null)
   const [viewingEntry, setViewingEntry] = useState<JourneyEntry | null>(null)
   const [editingEntry, setEditingEntry] = useState<JourneyEntry | null>(null)
-  const [lightbox, setLightbox] = useState<{ photos: { id: number; src: string; caption?: string | null; provider?: string; asset_id?: string | null; owner_id?: number | null; mediaType?: string | null }[]; index: number } | null>(null)
+  const [lightbox, setLightbox] = useState<{ photos: { id: string | number; src: string; caption?: string | null; provider?: string; asset_id?: string | null; owner_id?: number | null; mediaType?: string | null; infoUrl?: string }[]; index: number } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<JourneyEntry | null>(null)
   const [showInvite, setShowInvite] = useState(false)
   const [showAddTrip, setShowAddTrip] = useState(false)
@@ -56,10 +58,39 @@ export function useJourneyDetail() {
   const [unlinkTrip, setUnlinkTrip] = useState<{ trip_id: number; title: string } | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [hideSkeletons, setHideSkeletons] = useState(false)
+  const [showProviderPhotos, setShowProviderPhotos] = useState(false)
+  const [providerPhotos, setProviderPhotos] = useState<Array<{ id: string; provider: string; takenAt: string | null; mediaType: 'image'; city: string | null; country: string | null; lat: number; lng: number }>>([])
+  const [providerPhotosLoading, setProviderPhotosLoading] = useState(false)
+  const [providerPhotosLoaded, setProviderPhotosLoaded] = useState(false)
 
   useEffect(() => {
     if (id) loadJourney(Number(id)).catch(() => {})
   }, [id])
+
+  useEffect(() => {
+    setShowProviderPhotos(false)
+    setProviderPhotos([])
+    setProviderPhotosLoaded(false)
+  }, [id])
+
+  useEffect(() => {
+    if (!showProviderPhotos || !id || providerPhotosLoaded) return
+    let cancelled = false
+    setProviderPhotosLoading(true)
+    journeyApi.providerMapPhotos(Number(id))
+      .then(result => {
+        if (cancelled) return
+        setProviderPhotos(result.photos || [])
+        setProviderPhotosLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error(t('common.errorOccurred'))
+      })
+      .finally(() => {
+        if (!cancelled) setProviderPhotosLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [showProviderPhotos, id, providerPhotosLoaded, t, toast])
 
   useEffect(() => {
     if (current?.hide_skeletons !== undefined) setHideSkeletons(current.hide_skeletons)
@@ -273,6 +304,36 @@ export function useJourneyDetail() {
     return dates
   }, [current?.trips])
 
+  const providerPhotoMarkers = useMemo<JourneyMapPhotoMarker[]>(() => {
+    if (!id) return []
+    const journeyId = Number(id)
+    return providerPhotos.map(photo => ({
+      id: `${photo.provider}:${photo.id}`,
+      provider: photo.provider,
+      assetId: photo.id,
+      lat: photo.lat,
+      lng: photo.lng,
+      takenAt: photo.takenAt,
+      thumbnailUrl: journeyApi.providerPhotoUrl(journeyId, photo.provider, photo.id, 'thumbnail'),
+      originalUrl: journeyApi.providerPhotoUrl(journeyId, photo.provider, photo.id, 'original'),
+      infoUrl: journeyApi.providerPhotoUrl(journeyId, photo.provider, photo.id, 'info'),
+    }))
+  }, [id, providerPhotos])
+
+  const handleProviderPhotoClick = useCallback((photo: JourneyMapPhotoMarker) => {
+    setLightbox({
+      photos: [{
+        id: photo.id,
+        src: photo.originalUrl,
+        provider: photo.provider,
+        asset_id: photo.assetId,
+        mediaType: 'image',
+        infoUrl: photo.infoUrl,
+      }],
+      index: 0,
+    })
+  }, [])
+
   return {
     id, navigate, toast, t, locale,
     current, loading,
@@ -283,6 +344,8 @@ export function useJourneyDetail() {
     showInvite, setShowInvite, showAddTrip, setShowAddTrip,
     unlinkTrip, setUnlinkTrip, showSettings, setShowSettings,
     hideSkeletons, setHideSkeletons,
+    showProviderPhotos, setShowProviderPhotos, providerPhotoMarkers, providerPhotosLoading,
+    handleProviderPhotoClick,
     mapRef, fullMapRef, activeLocationId, handleMarkerClick, handleLocationClick,
     mapEntries, sidebarMapItems, tripDates, isMobile,
     loadJourney, updateEntry, deleteEntry, reorderEntries, uploadPhotos, deletePhoto,

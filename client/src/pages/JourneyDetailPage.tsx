@@ -46,6 +46,7 @@ function JourneyDetailPageDesktop() {
     hideSkeletons, setHideSkeletons,
     mapRef, fullMapRef, activeLocationId, handleMarkerClick, handleLocationClick,
     mapEntries, sidebarMapItems, tripDates, isMobile,
+    showProviderPhotos, setShowProviderPhotos, providerPhotoMarkers, providerPhotosLoading, handleProviderPhotoClick,
     loadJourney, updateEntry, deleteEntry, reorderEntries, uploadPhotos, deletePhoto,
   } = useJourneyDetail()
 
@@ -445,6 +446,11 @@ function JourneyDetailPageDesktop() {
                   height={9999}
                   activeMarkerId={activeEntryId}
                   onMarkerClick={handleMarkerClick}
+                  photoMarkers={showProviderPhotos ? providerPhotoMarkers : []}
+                  onPhotoMarkerClick={handleProviderPhotoClick}
+                  showProviderPhotos={showProviderPhotos}
+                  onToggleProviderPhotos={() => setShowProviderPhotos(value => !value)}
+                  providerPhotosLoading={providerPhotosLoading}
                   fullScreen
                 />
               </div>
@@ -558,7 +564,7 @@ function JourneyDetailPageDesktop() {
       {/* Lightbox */}
       {lightbox && (
         <PhotoLightbox
-          photos={lightbox.photos.map(p => ({ id: p.id.toString(), src: p.src, caption: p.caption, provider: p.provider, asset_id: p.asset_id, owner_id: p.owner_id, mediaType: p.mediaType }))}
+          photos={lightbox.photos.map(p => ({ ...p, id: p.id.toString() }))}
           startIndex={lightbox.index}
           onClose={() => setLightbox(null)}
         />

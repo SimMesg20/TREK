@@ -1,6 +1,6 @@
 import { forwardRef, lazy, Suspense, useImperativeHandle, useRef } from 'react'
 import { useSettingsStore } from '../../store/settingsStore'
-import JourneyMap, { type JourneyMapHandle } from './JourneyMap'
+import JourneyMap, { type JourneyMapHandle, type JourneyMapPhotoMarker } from './JourneyMap'
 import type { JourneyMapGLHandle } from './JourneyMapGL'
 
 // Lazy-load the GL renderer (and its ~230 KB gzip engine) so Leaflet-only
@@ -30,6 +30,11 @@ interface Props {
   dark?: boolean
   activeMarkerId?: string | null
   onMarkerClick?: (id: string, type?: string) => void
+  photoMarkers?: JourneyMapPhotoMarker[]
+  onPhotoMarkerClick?: (photo: JourneyMapPhotoMarker) => void
+  showProviderPhotos?: boolean
+  onToggleProviderPhotos?: () => void
+  providerPhotosLoading?: boolean
   fullScreen?: boolean
   paddingBottom?: number
 }

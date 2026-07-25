@@ -227,4 +227,38 @@ describe('JourneyMap', () => {
     expect(buttons[0].textContent).toBe('+');
     expect(buttons[1].textContent).toBe('−');
   });
+
+  it('FE-COMP-JOURNEYMAP-013: renders provider photos as circular image markers', () => {
+    const onPhotoMarkerClick = vi.fn();
+    render(
+      <JourneyMap
+        checkins={[]}
+        entries={[]}
+        photoMarkers={[{
+          id: 'immich:photo-1', provider: 'immich', assetId: 'photo-1',
+          lat: 48.8566, lng: 2.3522, takenAt: '2025-06-01T12:00:00Z',
+          thumbnailUrl: '/thumb.jpg', originalUrl: '/original.jpg', infoUrl: '/info',
+        }]}
+        onPhotoMarkerClick={onPhotoMarkerClick}
+      />
+    );
+    expect(L.marker).toHaveBeenCalledTimes(1);
+    const photoIcon = (L.divIcon as any).mock.calls[0][0];
+    expect(photoIcon.html).toContain('/thumb.jpg');
+    expect(photoIcon.html).toContain('border-radius:50%');
+    const marker = (L.marker as any).mock.results[0].value;
+    const clickHandler = marker.on.mock.calls.find((call: any[]) => call[0] === 'click')?.[1];
+    clickHandler?.();
+    expect(onPhotoMarkerClick).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'photo-1' }));
+  });
+
+  it('FE-COMP-JOURNEYMAP-014: exposes the provider photo toggle when controlled', () => {
+    const onToggle = vi.fn();
+    const { container } = render(<JourneyMap checkins={[]} entries={[]} onToggleProviderPhotos={onToggle} showProviderPhotos />);
+    const button = container.querySelector('button');
+    expect(button).not.toBeNull();
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    button.click();
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
 });

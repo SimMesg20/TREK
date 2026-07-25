@@ -39,6 +39,7 @@ export default function MJourneyDetail() {
     showSettings, setShowSettings,
     hideSkeletons,
     sidebarMapItems,
+    showProviderPhotos, setShowProviderPhotos, providerPhotoMarkers, providerPhotosLoading, handleProviderPhotoClick,
     loadJourney, updateEntry, deleteEntry, uploadPhotos,
   } = useJourneyDetail()
 
@@ -208,6 +209,11 @@ export default function MJourneyDetail() {
           dark={dark}
           activeMarkerId={entries[activeIndex] ? String(entries[activeIndex].id) : null}
           onMarkerClick={handleMarkerClick}
+          photoMarkers={showProviderPhotos ? providerPhotoMarkers : []}
+          onPhotoMarkerClick={handleProviderPhotoClick}
+          showProviderPhotos={showProviderPhotos}
+          onToggleProviderPhotos={() => setShowProviderPhotos(value => !value)}
+          providerPhotosLoading={providerPhotosLoading}
           fullScreen
           paddingBottom={200}
         />
@@ -452,15 +458,7 @@ export default function MJourneyDetail() {
       {/* Lightbox */}
       {lightbox && (
         <PhotoLightbox
-          photos={lightbox.photos.map(p => ({
-            id: p.id.toString(),
-            src: p.src,
-            caption: p.caption,
-            provider: p.provider,
-            asset_id: p.asset_id,
-            owner_id: p.owner_id,
-            mediaType: p.mediaType,
-          }))}
+          photos={lightbox.photos.map(p => ({ ...p, id: p.id.toString() }))}
           startIndex={lightbox.index}
           onClose={() => setLightbox(null)}
         />
