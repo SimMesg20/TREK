@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpException, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
+import { readEnv } from '../../app-config';
 import { AdminService } from './admin.service';
 import { PluginRuntimeService } from '../plugins/plugin-runtime.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -345,7 +346,7 @@ export class AdminController {
   @Post('dev/test-notification')
   @HttpCode(200)
   async devTestNotification(@CurrentUser() user: User, @Body() body: { event?: string; scope?: string; targetId?: number; params?: Record<string, unknown>; inApp?: boolean }) {
-    if (process.env.NODE_ENV?.toLowerCase() !== 'development') {
+    if (!readEnv().app.isDevelopment) {
       throw new NotFoundException();
     }
     try {

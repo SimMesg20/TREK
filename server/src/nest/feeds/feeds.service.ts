@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { exportICS } from '../../services/tripService';
 
 const ninetyDaysAgo = () => {
@@ -15,10 +15,16 @@ function feedUrl(token: string, scope: 'trip' | 'user', base: string): string {
 
 @Injectable()
 export class FeedsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   // ── Trip feed token ─────────────────────────────────────────────────────
 
   private tripTokenRow(tripId: string, userId: number) {
-    return db
+    return this.db
       .prepare(
         'SELECT feed_token FROM trips WHERE id = ? AND (user_id = ? OR id IN (SELECT trip_id FROM trip_members WHERE user_id = ?))',
       )
@@ -35,26 +41,26 @@ export class FeedsService {
     const row = this.tripTokenRow(tripId, userId);
     if (row?.feed_token) return { feed_url: feedUrl(row.feed_token, 'trip', base) };
     const token = randomUUID();
-    db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
+    this.db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
     return { feed_url: feedUrl(token, 'trip', base) };
   }
 
   /** Rotate: always issue a fresh token, invalidating the previous URL. */
   rotateTripToken(tripId: string, base: string): { feed_url: string } {
     const token = randomUUID();
-    db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
+    this.db.prepare('UPDATE trips SET feed_token = ? WHERE id = ?').run(token, tripId);
     return { feed_url: feedUrl(token, 'trip', base) };
   }
 
   /** Disable: clear the token so the public URL stops resolving. */
   disableTripToken(tripId: string): void {
-    db.prepare('UPDATE trips SET feed_token = NULL WHERE id = ?').run(tripId);
+    this.db.prepare('UPDATE trips SET feed_token = NULL WHERE id = ?').run(tripId);
   }
 
   // ── User (all-trips) feed token ──────────────────────────────────────────
 
   getUserToken(userId: number, base: string): { feed_url: string | null } {
-    const row = db.prepare('SELECT feed_token FROM users WHERE id = ?').get(userId) as
+    const row = this.db.prepare('SELECT feed_token FROM users WHERE id = ?').get(userId) as
       | { feed_token: string | null }
       | undefined;
     return { feed_url: row?.feed_token ? feedUrl(row.feed_token, 'user', base) : null };
@@ -64,24 +70,24 @@ export class FeedsService {
     const existing = this.getUserToken(userId, base);
     if (existing.feed_url) return { feed_url: existing.feed_url };
     const token = randomUUID();
-    db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
+    this.db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
     return { feed_url: feedUrl(token, 'user', base) };
   }
 
   rotateUserToken(userId: number, base: string): { feed_url: string } {
     const token = randomUUID();
-    db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
+    this.db.prepare('UPDATE users SET feed_token = ? WHERE id = ?').run(token, userId);
     return { feed_url: feedUrl(token, 'user', base) };
   }
 
   disableUserToken(userId: number): void {
-    db.prepare('UPDATE users SET feed_token = NULL WHERE id = ?').run(userId);
+    this.db.prepare('UPDATE users SET feed_token = NULL WHERE id = ?').run(userId);
   }
 
   // ── ICS generation ───────────────────────────────────────────────────────
 
   buildTripIcs(token: string): { ics: string; filename: string } | null {
-    const row = db.prepare('SELECT id FROM trips WHERE feed_token = ?').get(token) as
+    const row = this.db.prepare('SELECT id FROM trips WHERE feed_token = ?').get(token) as
       | { id: number }
       | undefined;
     if (!row) return null;
@@ -101,7 +107,7 @@ export class FeedsService {
   }
 
   buildUserIcs(token: string): { ics: string; calName: string } | null {
-    const user = db.prepare('SELECT id, username FROM users WHERE feed_token = ?').get(token) as
+    const user = this.db.prepare('SELECT id, username FROM users WHERE feed_token = ?').get(token) as
       | { id: number; username: string }
       | undefined;
     if (!user) return null;
@@ -110,7 +116,7 @@ export class FeedsService {
     // "All Trips" means every trip the user can open — trips they own AND trips shared with
     // them as a member — mirroring the single-trip feed's access (tripTokenRow/assertAccess).
     // A membership WHERE on trips selects each row once, so owned + member trips don't dupe.
-    const trips = db
+    const trips = this.db
       .prepare(
         `SELECT id FROM trips
          WHERE (user_id = ? OR id IN (SELECT trip_id FROM trip_members WHERE user_id = ?))

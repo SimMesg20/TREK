@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { db, canAccessTrip } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { broadcast } from '../../websocket';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
@@ -22,8 +22,14 @@ import { searchUnsplashPhotos, getUnsplashKey } from '../../services/unsplashSer
  */
 @Injectable()
 export class TripsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   canAccessTrip(tripId: string, userId: number) {
-    return canAccessTrip(tripId, userId) as { user_id: number } | null | undefined;
+    return this.dbs.canAccessTrip(tripId, userId) as { user_id: number } | null | undefined;
   }
 
   can(action: string, role: string, ownerId: number | null, userId: number, isMember: boolean): boolean {
@@ -84,7 +90,7 @@ export class TripsService {
 
   /** Re-read a freshly copied trip in list shape (mirrors the route's TRIP_SELECT query). */
   getCopiedTrip(newTripId: number, userId: number) {
-    return db.prepare(`${tripSvc.TRIP_SELECT} WHERE t.id = :tripId`).get({ userId, tripId: newTripId });
+    return this.db.prepare(`${tripSvc.TRIP_SELECT} WHERE t.id = :tripId`).get({ userId, tripId: newTripId });
   }
 
   listMembers(tripId: string, ownerId: number) {

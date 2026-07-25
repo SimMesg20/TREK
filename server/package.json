@@ -1,6 +1,6 @@
 {
   "name": "@trek/server",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "main": "src/index.ts",
   "scripts": {
     "start": "node --require tsconfig-paths/register dist/index.js",
@@ -24,6 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@nestjs/common": "^11.1.24",
+    "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.24",
     "@nestjs/platform-express": "^11.1.24",
     "@nestjs/swagger": "^11.4.5",
@@ -40,6 +41,7 @@
     "fast-xml-parser": "^5.5.10",
     "helmet": "^8.1.0",
     "jimp": "^1.6.1",
+    "json5": "^2.2.3",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^9.0.1",

@@ -1,6 +1,7 @@
 import archiver from 'archiver';
 import unzipper from 'unzipper';
 import path from 'path';
+import { readEnv } from '../app-config';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import { db, closeDb, reinitialize } from '../db/database';
@@ -20,36 +21,16 @@ const uploadsDir = path.join(__dirname, '../../uploads');
 
 // Compressed upload cap for restore archives. Defaults to 500 MB, raisable via
 // BACKUP_UPLOAD_LIMIT_MB for instances whose backups (uploads/ included) grow
-// past that. Invalid values warn and fall back to the default.
-const DEFAULT_BACKUP_UPLOAD_LIMIT_MB = 500;
-const rawBackupUploadLimit = process.env.BACKUP_UPLOAD_LIMIT_MB?.trim();
-let backupUploadLimitMb = DEFAULT_BACKUP_UPLOAD_LIMIT_MB;
-if (rawBackupUploadLimit) {
-  const parsed = Number(rawBackupUploadLimit);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    backupUploadLimitMb = parsed;
-  } else {
-    console.warn(`BACKUP_UPLOAD_LIMIT_MB="${rawBackupUploadLimit}" is not a positive number. Falling back to ${DEFAULT_BACKUP_UPLOAD_LIMIT_MB} MB.`);
-  }
-}
-export const MAX_BACKUP_UPLOAD_SIZE = backupUploadLimitMb * 1024 * 1024; // compressed
+// past that. Malformed values abort boot (app-config fail-fast validation);
+// frozen at import on purpose (legacy timing).
+const backupEnv = readEnv().backup;
+export const MAX_BACKUP_UPLOAD_SIZE = backupEnv.uploadLimitMb * 1024 * 1024; // compressed
 // Upper bound on the TOTAL decompressed size of a restore archive (the upload
 // limit only caps the compressed bytes). Default 5 GB, raisable via
 // BACKUP_MAX_DECOMPRESSED_MB for an instance whose own backups (now including the
 // plugin trees) legitimately grow past it — otherwise its own backups become
-// unrestorable. Invalid values warn and fall back to the default.
-const DEFAULT_BACKUP_DECOMPRESSED_MB = 5 * 1024;
-const rawDecompressedLimit = process.env.BACKUP_MAX_DECOMPRESSED_MB?.trim();
-let backupDecompressedMb = DEFAULT_BACKUP_DECOMPRESSED_MB;
-if (rawDecompressedLimit) {
-  const parsed = Number(rawDecompressedLimit);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    backupDecompressedMb = parsed;
-  } else {
-    console.warn(`BACKUP_MAX_DECOMPRESSED_MB="${rawDecompressedLimit}" is not a positive number. Falling back to ${DEFAULT_BACKUP_DECOMPRESSED_MB} MB.`);
-  }
-}
-export const MAX_BACKUP_DECOMPRESSED_SIZE = backupDecompressedMb * 1024 * 1024;
+// unrestorable.
+export const MAX_BACKUP_DECOMPRESSED_SIZE = backupEnv.maxDecompressedMb * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -209,7 +190,7 @@ export async function createBackup(): Promise<BackupInfo> {
       // store/transfer it securely. Skipped when ENCRYPTION_KEY is provided via
       // env, since in that case the file is not the source of truth.
       const encKeyPath = path.join(dataDir, '.encryption_key');
-      if (!process.env.ENCRYPTION_KEY && fs.existsSync(encKeyPath)) {
+      if (!readEnv().backup.encryptionKeyFromEnv && fs.existsSync(encKeyPath)) {
         archive.file(encKeyPath, { name: '.encryption_key' });
       }
 
@@ -491,7 +472,7 @@ export async function restoreFromZip(zipPath: string): Promise<RestoreResult> {
 // ---------------------------------------------------------------------------
 
 export function getAutoSettings(): { settings: ReturnType<typeof scheduler.loadSettings>; timezone: string } {
-  const tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const tz = readEnv().app.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   return { settings: scheduler.loadSettings(), timezone: tz };
 }
 

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { pluginsEnabled } from './kill-switch';
 import { devLinkEnabled } from './dev-link';
 import { maybe_encrypt_api_key, decrypt_api_key } from '../../services/apiKeyCrypto';
@@ -99,8 +100,14 @@ export interface PluginListItem {
 
 @Injectable()
 export class PluginsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   list(): { enabled: boolean; devLink: boolean; plugins: PluginListItem[] } {
-    const rows = db
+    const rows = this.db
       .prepare(
         `SELECT id, name, description, type, icon, version, status, enabled, last_error, reviewed_at, source_repo,
                 permissions, capabilities, dependencies, operator_egress, trek_range,
@@ -160,12 +167,12 @@ export class PluginsService {
    * the config with secrets masked for the client.
    */
   updateInstanceConfig(id: string, patch: Record<string, unknown>): Record<string, unknown> {
-    const row = db.prepare('SELECT config FROM plugins WHERE id = ?').get(id) as { config: string } | undefined;
+    const row = this.db.prepare('SELECT config FROM plugins WHERE id = ?').get(id) as { config: string } | undefined;
     if (!row) throw new Error(`plugin ${id} not found`);
 
     const secretKeys = new Set(
       (
-        db
+        this.db
           .prepare("SELECT field_key FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'instance' AND secret = 1")
           .all(id) as Array<{ field_key: string }>
       ).map((r) => r.field_key),
@@ -180,13 +187,13 @@ export class PluginsService {
         config[k] = v;
       }
     }
-    db.prepare('UPDATE plugins SET config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(config), id);
+    this.db.prepare('UPDATE plugins SET config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(config), id);
     return maskSecrets(config, secretKeys);
   }
 
   /** The plugin's `scope:'user'` settings fields, in declared order (for the user form). */
   userSettingsFields(id: string): Array<Record<string, unknown>> {
-    return db
+    return this.db
       .prepare(
         `SELECT field_key AS key, label, input_type, placeholder, hint, required, secret, options
          FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'user' ORDER BY sort_order, id`,
@@ -210,7 +217,7 @@ export class PluginsService {
   private userSecretKeys(id: string): Set<string> {
     return new Set(
       (
-        db
+        this.db
           .prepare("SELECT field_key FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'user' AND secret = 1")
           .all(id) as Array<{ field_key: string }>
       ).map((r) => r.field_key),
@@ -219,7 +226,7 @@ export class PluginsService {
 
   /** A user's own config for a plugin, secrets masked (safe to send to the client). */
   getUserConfig(id: string, userId: number): Record<string, unknown> {
-    const row = db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
+    const row = this.db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
       | { config: string }
       | undefined;
     return maskSecrets(safeParse(row?.config ?? '{}'), this.userSecretKeys(id));
@@ -229,12 +236,12 @@ export class PluginsService {
    * ciphertext). Only keys declared as `scope:'user'` fields are accepted. Returns masked. */
   updateUserConfig(id: string, userId: number, patch: Record<string, unknown>): Record<string, unknown> {
     const allowed = new Set(
-      (db.prepare("SELECT field_key FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'user'").all(id) as Array<{ field_key: string }>).map(
+      (this.db.prepare("SELECT field_key FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'user'").all(id) as Array<{ field_key: string }>).map(
         (r) => r.field_key,
       ),
     );
     const secretKeys = this.userSecretKeys(id);
-    const existing = db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
+    const existing = this.db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
       | { config: string }
       | undefined;
     const config = safeParse(existing?.config ?? '{}');
@@ -247,7 +254,7 @@ export class PluginsService {
         config[k] = v;
       }
     }
-    db.prepare(
+    this.db.prepare(
       `INSERT INTO plugin_user_config (plugin_id, user_id, config, updated_at) VALUES (?, ?, ?, datetime('now'))
        ON CONFLICT(plugin_id, user_id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`,
     ).run(id, userId, JSON.stringify(config));
@@ -257,7 +264,7 @@ export class PluginsService {
   /** A user's own config with secrets DECRYPTED — host-only, for runtime `ctx.settings`.
    * Never sent to a client; the acting user is resolved host-side. */
   getUserConfigDecrypted(id: string, userId: number): Record<string, unknown> {
-    const row = db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
+    const row = this.db.prepare('SELECT config FROM plugin_user_config WHERE plugin_id = ? AND user_id = ?').get(id, userId) as
       | { config: string }
       | undefined;
     const config = safeParse(row?.config ?? '{}');
@@ -269,18 +276,18 @@ export class PluginsService {
 
   /** A plugin's error log, newest first. */
   errors(id: string): Array<{ ts: string; level: string; message: string }> {
-    return db
+    return this.db
       .prepare('SELECT ts, level, message FROM plugin_error_log WHERE plugin_id = ? ORDER BY ts DESC, id DESC LIMIT 200')
       .all(id) as Array<{ ts: string; level: string; message: string }>;
   }
 
   clearErrors(id: string): void {
-    db.prepare('DELETE FROM plugin_error_log WHERE plugin_id = ?').run(id);
+    this.db.prepare('DELETE FROM plugin_error_log WHERE plugin_id = ?').run(id);
   }
 
   /** A plugin's hash-chained capability audit log, newest first. */
   auditLog(id: string): unknown[] {
-    return readAudit(db, id);
+    return readAudit(this.db, id);
   }
 
   /** A plugin's broker budget usage for today (AI + notification counts vs caps). */
@@ -290,11 +297,11 @@ export class PluginsService {
 
   /** Read the instance config with secret fields masked. */
   getInstanceConfig(id: string): Record<string, unknown> {
-    const row = db.prepare('SELECT config FROM plugins WHERE id = ?').get(id) as { config: string } | undefined;
+    const row = this.db.prepare('SELECT config FROM plugins WHERE id = ?').get(id) as { config: string } | undefined;
     if (!row) throw new Error(`plugin ${id} not found`);
     const secretKeys = new Set(
       (
-        db
+        this.db
           .prepare("SELECT field_key FROM plugin_settings_fields WHERE plugin_id = ? AND scope = 'instance' AND secret = 1")
           .all(id) as Array<{ field_key: string }>
       ).map((r) => r.field_key),

@@ -19,10 +19,11 @@ const { share } = vi.hoisted(() => ({
 vi.mock('../../../src/services/shareService', () => share);
 
 import { ShareService } from '../../../src/nest/share/share.service';
+import type { DatabaseService } from '../../../src/nest/database/database.service';
 import type { User } from '../../../src/types';
 
 function svc() {
-  return new ShareService();
+  return new ShareService({ canAccessTrip } as unknown as DatabaseService);
 }
 
 beforeEach(() => vi.clearAllMocks());

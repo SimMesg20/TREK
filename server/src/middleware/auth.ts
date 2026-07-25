@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { JWT_SECRET } from '../config';
 import { AuthRequest, OptionalAuthRequest, User } from '../types';
@@ -109,7 +110,7 @@ const adminOnly = (req: Request, res: Response, next: NextFunction): void => {
 
 const demoUploadBlock = (req: Request, res: Response, next: NextFunction): void => {
   const authReq = req as AuthRequest;
-  if (process.env.DEMO_MODE?.toLowerCase() === 'true' && isDemoEmail(authReq.user?.email)) {
+  if (readEnv().demo.enabled && isDemoEmail(authReq.user?.email)) {
     res.status(403).json({ error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' });
     return;
   }

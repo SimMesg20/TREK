@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { extractToken, verifyJwtAndLoadUser } from './auth';
 import { DEMO_EMAILS } from '../services/demo';
@@ -76,7 +77,7 @@ export function enforceGlobalMfaPolicy(req: Request, res: Response, next: NextFu
     return;
   }
 
-  if (process.env.DEMO_MODE?.toLowerCase() === 'true' && verified.email && DEMO_EMAILS.has(verified.email)) {
+  if (readEnv().demo.enabled && verified.email && DEMO_EMAILS.has(verified.email)) {
     next();
     return;
   }

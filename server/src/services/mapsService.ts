@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { safeFetchFollow, SsrfBlockedError } from '../utils/ssrfGuard';
 import { decrypt_api_key } from './apiKeyCrypto';
@@ -12,7 +13,7 @@ let googleApiCallCount = 0;
 function googleFetch(endpoint: string, label: string, init?: RequestInit): Promise<Response> {
   googleApiCallCount++;
   console.debug(`[Google API] #${googleApiCallCount} ${label} → ${endpoint}`);
-  const referer = process.env.APP_URL ? getAppUrl() : undefined;
+  const referer = readEnv().app.appUrl ? getAppUrl() : undefined;
   return fetch(endpoint, {
     ...init,
     headers: { ...(referer ? { Referer: referer } : {}), ...((init?.headers as Record<string, string>) ?? {}) },
@@ -333,7 +334,7 @@ const DEFAULT_OVERPASS_MIRRORS = [
 // at one or more custom endpoints via OVERPASS_URL (comma-separated). When set it
 // REPLACES the public mirrors, so a firewalled cluster never reaches out to them and a
 // self-hosted instance is used exclusively (see #1309). Non-http(s) entries are dropped.
-export function resolveOverpassEndpoints(raw: string | undefined = process.env.OVERPASS_URL): string[] {
+export function resolveOverpassEndpoints(raw: string | undefined = readEnv().integrations.overpassUrl): string[] {
   const custom = (raw ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -354,7 +355,8 @@ const OVERPASS_MIRRORS = resolveOverpassEndpoints();
 // slow self-hosted endpoint can raise it via OVERPASS_TIMEOUT_MS. A non-positive or
 // non-numeric value falls back to the default — a 0/negative cap would abort every
 // request immediately and 502 the search.
-export function resolveOverpassTimeoutMs(raw: string | undefined = process.env.OVERPASS_TIMEOUT_MS): number {
+export function resolveOverpassTimeoutMs(raw?: string): number {
+  if (raw === undefined) return readEnv().integrations.overpassTimeoutMs;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : 12000;
 }
@@ -437,6 +439,7 @@ async function overpassFetch(query: string): Promise<OverpassPoiElement[]> {
 export async function searchOverpassPois(
   category: string,
   bbox: { south: number; west: number; north: number; east: number },
+  lang?: string,
   limit = 60,
 ): Promise<PoiSearchResult> {
   const filters = CATEGORY_OSM_FILTERS[category];
@@ -459,8 +462,15 @@ export async function searchOverpassPois(
     clamped = true;
   }
 
+  // OSM `name:*` tags are keyed by language subtag: prefer the user's language
+  // (the same localization the search/autocomplete path asks the geocoder for)
+  // over the native `name`. `int_name` is OSM's international/romanized name — a
+  // sensible fallback before the native one. Part of the cache key so a cached
+  // area isn't served with another language's titles.
+  const osmLang = toApiLang(lang).split('-')[0].toLowerCase();
+
   // Serve repeat pans/toggles of the same area straight from the cache.
-  const cacheKey = `${category}|${south.toFixed(2)},${west.toFixed(2)},${north.toFixed(2)},${east.toFixed(2)}|${limit}`;
+  const cacheKey = `${category}|${osmLang}|${south.toFixed(2)},${west.toFixed(2)},${north.toFixed(2)},${east.toFixed(2)}|${limit}`;
   const cached = POI_CACHE.get(cacheKey);
   if (cached && Date.now() - cached.at < POI_CACHE_TTL_MS) return cached.value;
   if (cached) POI_CACHE.delete(cacheKey); // expired — drop it before refetching
@@ -482,7 +492,7 @@ export async function searchOverpassPois(
   const pois: OverpassPoi[] = [];
   for (const el of elements) {
     const tags = el.tags || {};
-    const name = tags.name || tags['name:en'] || tags.brand || null;
+    const name = tags[`name:${osmLang}`] || tags['int_name'] || tags.name || tags.brand || null;
     if (!name) continue; // unnamed POIs aren't useful to add to a plan
     const lat = el.lat ?? el.center?.lat;
     const lng = el.lon ?? el.center?.lon;

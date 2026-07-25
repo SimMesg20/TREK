@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { JWT_SECRET, SESSION_DURATION_SECONDS } from '../config';
 import { User } from '../types';
@@ -129,11 +130,12 @@ export function getOidcConfig(): OidcConfig | null {
   const get = (key: string) =>
     (db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value || null;
 
-  const issuer = process.env.OIDC_ISSUER || get('oidc_issuer');
-  const clientId = process.env.OIDC_CLIENT_ID || get('oidc_client_id');
-  const clientSecret = process.env.OIDC_CLIENT_SECRET || decrypt_api_key(get('oidc_client_secret'));
-  const displayName = process.env.OIDC_DISPLAY_NAME || get('oidc_display_name') || 'SSO';
-  const discoveryUrl = process.env.OIDC_DISCOVERY_URL || get('oidc_discovery_url') || null;
+  const oidcEnv = readEnv().oidc;
+  const issuer = oidcEnv.issuer || get('oidc_issuer');
+  const clientId = oidcEnv.clientId || get('oidc_client_id');
+  const clientSecret = oidcEnv.clientSecret || decrypt_api_key(get('oidc_client_secret'));
+  const displayName = oidcEnv.displayName || get('oidc_display_name') || 'SSO';
+  const discoveryUrl = oidcEnv.discoveryUrl || get('oidc_discovery_url') || null;
 
   if (!issuer || !clientId || !clientSecret) return null;
   return { issuer: issuer.replace(/\/+$/, ''), clientId, clientSecret, displayName, discoveryUrl };
@@ -182,9 +184,9 @@ export async function discover(issuer: string, discoveryUrl?: string | null): Pr
 
 export function resolveOidcRole(userInfo: OidcUserInfo, isFirstUser: boolean): 'admin' | 'user' {
   if (isFirstUser) return 'admin';
-  const adminValue = process.env.OIDC_ADMIN_VALUE;
+  const adminValue = readEnv().oidc.adminValue;
   if (!adminValue) return 'user';
-  const claimKey = process.env.OIDC_ADMIN_CLAIM || 'groups';
+  const claimKey = readEnv().oidc.adminClaim;
   const claimData = userInfo[claimKey];
   if (Array.isArray(claimData)) {
     return claimData.some((v) => String(v) === adminValue) ? 'admin' : 'user';
@@ -200,7 +202,8 @@ export function resolveOidcRole(userInfo: OidcUserInfo, isFirstUser: boolean): '
 // ---------------------------------------------------------------------------
 
 export function frontendUrl(path: string): string {
-  const base = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173';
+  // Case-sensitive on purpose (legacy parity).
+  const base = readEnv().app.nodeEnv === 'production' ? '' : 'http://localhost:5173';
   return base + path;
 }
 
@@ -398,7 +401,7 @@ export function findOrCreateUser(
       db.prepare('UPDATE users SET oidc_sub = ?, oidc_issuer = ? WHERE id = ?').run(sub, config.issuer, user.id);
     }
     // Update role based on OIDC claims on every login (if claim mapping is configured)
-    if (process.env.OIDC_ADMIN_VALUE) {
+    if (readEnv().oidc.adminValue) {
       const newRole = resolveOidcRole(userInfo, false);
       if (user.role !== newRole) {
         // Never let the claim-based downgrade strip the last admin. The bootstrap
@@ -476,7 +479,7 @@ export function findOrCreateUser(
       }
       const ins = db.prepare(
         'INSERT INTO users (username, email, password_hash, role, oidc_sub, oidc_issuer, avatar, first_seen_version, login_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
-      ).run(username, email, hash, role, sub, config.issuer, picture, process.env.APP_VERSION || '0.0.0');
+      ).run(username, email, hash, role, sub, config.issuer, picture, readEnv().app.appVersion || '0.0.0');
       // Trip-bound invite (#1402): auto-add the new SSO user to the trip inside the
       // same atomic step as the invite consume. Idempotent + owner-safe.
       if (validInvite?.trip_id) {

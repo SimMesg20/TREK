@@ -20,6 +20,8 @@ const { testDb, dbMock } = vi.hoisted(() => {
   return { testDb: db, dbMock: { db, closeDb: () => {}, reinitialize: () => {}, canAccessTrip: () => null } };
 });
 vi.mock('../../../src/db/database', () => dbMock);
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 vi.mock('../../../src/config', () => ({ JWT_SECRET: 'x'.repeat(40), ENCRYPTION_KEY: 'a'.repeat(64), updateJwtSecret: () => {} }));
 
 import { createTables } from '../../../src/db/schema';
@@ -42,7 +44,7 @@ beforeEach(() => {
   testDb.prepare('DELETE FROM plugins').run();
   testDb.prepare('DELETE FROM plugin_egress_hosts').run();
   testDb.prepare('DELETE FROM plugin_actions').run();
-  rt = new PluginRuntimeService();
+  rt = new PluginRuntimeService(new DatabaseService(dbConn));
 });
 
 describe('operator-supplied egress hosts', () => {
@@ -156,13 +158,13 @@ describe('the admin list surfaces operator egress (so the chip can be shown)', (
     install('gotify', true);
     install('plain', false);
 
-    const before = new PluginsService().list().plugins;
+    const before = new PluginsService(new DatabaseService(dbConn)).list().plugins;
     expect(before.find(p => p.id === 'gotify')).toMatchObject({ operatorEgress: true, egressHostCount: 0 });
     // A plugin that never asked for it must never invite the admin to add hosts.
     expect(before.find(p => p.id === 'plain')).toMatchObject({ operatorEgress: false, egressHostCount: 0 });
 
     await rt.setOperatorEgressHosts('gotify', ['a.example.com', 'b.example.com']);
-    const after = new PluginsService().list().plugins;
+    const after = new PluginsService(new DatabaseService(dbConn)).list().plugins;
     expect(after.find(p => p.id === 'gotify')!.egressHostCount).toBe(2);
     delete process.env.TREK_PLUGINS_ENABLED;
   });

@@ -1,5 +1,9 @@
 import 'reflect-metadata';
 import 'dotenv/config';
+// Fail-fast env validation — must stay directly after dotenv so a malformed
+// variable aborts before any other module runs its import-time side effects
+// (config.ts key resolution, db/database.ts initDb, ...).
+import './app-config/boot-validate';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -20,17 +24,19 @@ const tmpDir = path.join(__dirname, '../data/tmp');
 });
 
 import * as scheduler from './scheduler';
+import { readEnv } from './app-config';
 import { getAppUrl, getMcpSafeUrl } from './services/notifications';
 
-const PORT = Number(process.env.PORT) || 3001;
-const HOST = process.env.HOST;
-const APP_VERSION: string = process.env.APP_VERSION || (require('../package.json') as { version: string }).version;
+const PORT = readEnv().app.port;
+const HOST = readEnv().app.host;
+const APP_VERSION: string = readEnv().app.appVersion || (require('../package.json') as { version: string }).version;
 
 const onListen = () => {
   const { logInfo: sLogInfo, logWarn: sLogWarn } = require('./services/auditLog');
-  const LOG_LVL = (process.env.LOG_LEVEL || 'info').toLowerCase();
-  const tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const origins = process.env.ALLOWED_ORIGINS || '(same-origin)';
+  const env = readEnv();
+  const LOG_LVL = (env.app.logLevel || 'info').toLowerCase();
+  const tz = env.app.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const origins = env.http.allowedOriginsRaw || '(same-origin)';
   const appUrl = getAppUrl();
   const resolvedAppUrl = getMcpSafeUrl();
   const banner = [
@@ -40,7 +46,7 @@ const onListen = () => {
     ...(HOST ? [`  Host:           ${HOST}`] : []),
     `  Container Port: ${PORT}`,
     `  App URL:        ${appUrl}`,
-    `  Environment:    ${process.env.NODE_ENV?.toLowerCase() || 'development'}`,
+    `  Environment:    ${env.app.nodeEnv?.toLowerCase() || 'development'}`,
     `  Timezone:       ${tz}`,
     `  Origins:        ${origins}`,
     `  Log level:      ${LOG_LVL}`,
@@ -51,12 +57,12 @@ const onListen = () => {
   ];
   banner.forEach(l => console.log(l));
   sLogInfo('NestJS serving all routes (Express decommissioned)');
-  if (process.env.APP_URL) {
+  if (env.app.appUrl) {
     let parsedAppUrl: URL | null = null;
-    try { parsedAppUrl = new URL(process.env.APP_URL); } catch { /* invalid */ }
+    try { parsedAppUrl = new URL(env.app.appUrl); } catch { /* invalid */ }
 
     if (!parsedAppUrl) {
-      sLogWarn(`APP_URL: "${process.env.APP_URL}" is not a valid URL — it will be ignored.`);
+      sLogWarn(`APP_URL: "${env.app.appUrl}" is not a valid URL — it will be ignored.`);
     }
 
     const mcpSafe = parsedAppUrl !== null && (
@@ -68,8 +74,8 @@ const onListen = () => {
       sLogWarn(`APP_URL: not MCP-safe (requires https:// or http://localhost) — MCP will use ${resolvedAppUrl}.`);
     }
   }
-  if (process.env.DEMO_MODE?.toLowerCase() === 'true') sLogInfo('Demo mode: ENABLED');
-  if (process.env.DEMO_MODE?.toLowerCase() === 'true' && process.env.NODE_ENV?.toLowerCase() === 'production') {
+  if (env.demo.enabled) sLogInfo('Demo mode: ENABLED');
+  if (env.demo.enabled && env.app.isProduction) {
     sLogWarn('SECURITY WARNING: DEMO_MODE is enabled in production!');
   }
   scheduler.start();

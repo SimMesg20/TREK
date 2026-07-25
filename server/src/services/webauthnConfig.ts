@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { getAppUrl } from './notifications';
 
@@ -47,8 +48,8 @@ export interface WebauthnConfig {
 
 export function resolveWebauthnConfig(): WebauthnConfig | null {
   // 1. Explicit operator config always wins.
-  const explicitRpId = (process.env.WEBAUTHN_RP_ID || getSetting('webauthn_rp_id'))?.trim() || null;
-  const explicitOrigins = (process.env.WEBAUTHN_ORIGINS || getSetting('webauthn_origins') || '')
+  const explicitRpId = (readEnv().webauthn.rpId || getSetting('webauthn_rp_id'))?.trim() || null;
+  const explicitOrigins = (readEnv().webauthn.origins || getSetting('webauthn_origins') || '')
     .split(',')
     .map((o) => o.trim().replace(/\/+$/, ''))
     .filter(Boolean);

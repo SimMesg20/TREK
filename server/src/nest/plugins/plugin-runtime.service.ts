@@ -1,6 +1,7 @@
 import { Injectable, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import semver from 'semver';
 import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { pluginsEnabled } from './kill-switch';
 import { setPluginEventSink } from '../../plugin-event-sink';
 import { setUserDeletedSink } from '../../plugin-user-lifecycle';
@@ -133,18 +134,18 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly supervisor = new PluginSupervisor((id, granted) => createRealRpcHost(id, granted, this), {
     // Both hooks run from child lifecycle EventEmitter callbacks (exit / stderr 'data'),
     // so a throw here becomes an uncaughtException that has no host-side handler. During a
-    // restore the core DB is briefly CLOSED (closeDb → the db proxy throws on access), so a
+    // restore the core DB is briefly CLOSED (closeDb → the this.db proxy throws on access), so a
     // status/log write in that window would otherwise take the whole process down mid-
     // restore. Swallow any DB error — a missed status row / log line is never worth a crash.
     onStatus: (id, status, error) => {
       try {
-        db.prepare('UPDATE plugins SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, error ?? null, id);
+        this.db.prepare('UPDATE plugins SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, error ?? null, id);
       } catch { /* DB unavailable (e.g. mid-restore) — a status write must never crash the host */ }
     },
     onLog: (id, level, msg) => {
       if (level !== 'error' && level !== 'warn') return;
       try {
-        db.prepare('INSERT INTO plugin_error_log (plugin_id, level, message) VALUES (?, ?, ?)').run(id, level, msg);
+        this.db.prepare('INSERT INTO plugin_error_log (plugin_id, level, message) VALUES (?, ?, ?)').run(id, level, msg);
         // Retention: a crash-looping plugin emits a stderr line per restart, so an
         // uncapped table grows without bound in the shared trek.db. Keep only the
         // most recent LOG_RETENTION rows per plugin (the admin view shows 200).
@@ -162,9 +163,17 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   // Coalesces overlapping erasure drains (the sweep and enqueue both trigger one).
   private drainInFlight: Promise<void> | null = null;
 
-  // Optional at the type level so tests can `new PluginRuntimeService()` without a
-  // registry; Nest always injects the real one (the provider is in the module).
-  constructor(private readonly registry?: PluginRegistryService) {}
+  // The registry stays optional at the type level so tests can construct the
+  // service without one; Nest always injects the real one (the provider is in
+  // the module).
+  constructor(
+    private readonly dbs: DatabaseService,
+    private readonly registry?: PluginRegistryService,
+  ) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
 
   onModuleInit(): void {
     if (!pluginsEnabled()) return;
@@ -199,7 +208,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     // boot must NEVER block app init, even in a context without plugin tables
     // (e.g. a slimmed-down test app that only imports AdminModule).
     try {
-      discoverPlugins(db);
+      discoverPlugins(this.db);
       const installed = this.installedDepRows();
       const enabledIds = [...installed.values()].filter((r) => r.enabled).map((r) => r.id);
       let order: string[];
@@ -246,13 +255,13 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (active.length === 0) return;
       const now = Date.now();
       const ph = active.map(() => '?').join(',');
-      const due = db
+      const due = this.db
         .prepare(`SELECT id, plugin_id, name, payload, every_ms FROM plugin_scheduled_tasks WHERE due_at <= ? AND plugin_id IN (${ph}) ORDER BY due_at LIMIT 200`)
         .all(now, ...active) as Array<{ id: number; plugin_id: string; name: string; payload: string; every_ms: number | null }>;
       for (const t of due) {
         if (!this.supervisor.isActive(t.plugin_id)) continue; // leave for a later sweep
-        if (t.every_ms) db.prepare('UPDATE plugin_scheduled_tasks SET due_at = ? WHERE id = ?').run(now + t.every_ms, t.id);
-        else db.prepare('DELETE FROM plugin_scheduled_tasks WHERE id = ?').run(t.id);
+        if (t.every_ms) this.db.prepare('UPDATE plugin_scheduled_tasks SET due_at = ? WHERE id = ?').run(now + t.every_ms, t.id);
+        else this.db.prepare('DELETE FROM plugin_scheduled_tasks WHERE id = ?').run(t.id);
         let payload: unknown = null;
         try { payload = JSON.parse(t.payload); } catch { /* corrupt payload -> null */ }
         this.supervisor.deliverScheduled(t.plugin_id, t.name, payload);
@@ -268,8 +277,8 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    * throws — a bookkeeping error must not fail the account deletion that triggered it. */
   private enqueueUserErasure(userId: number): void {
     try {
-      const rows = db.prepare('SELECT id, permissions FROM plugins').all() as Array<{ id: string; permissions: string | null }>;
-      const insert = db.prepare('INSERT OR IGNORE INTO plugin_user_erasure_queue (plugin_id, user_id) VALUES (?, ?)');
+      const rows = this.db.prepare('SELECT id, permissions FROM plugins').all() as Array<{ id: string; permissions: string | null }>;
+      const insert = this.db.prepare('INSERT OR IGNORE INTO plugin_user_erasure_queue (plugin_id, user_id) VALUES (?, ?)');
       for (const r of rows) {
         let perms: unknown;
         try { perms = JSON.parse(r.permissions ?? '[]'); } catch { perms = []; }
@@ -304,12 +313,12 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
       // honour the erasure (see uninstall()); reaping on registry-absence alone would wipe
       // exactly those preserved obligations. A deleteData=true uninstall already clears the
       // rows itself, so this only ever needs to catch a truly orphaned data dir.
-      const orphans = db
+      const orphans = this.db
         .prepare('SELECT DISTINCT plugin_id FROM plugin_user_erasure_queue WHERE plugin_id NOT IN (SELECT id FROM plugins)')
         .all() as Array<{ plugin_id: string }>;
       for (const { plugin_id } of orphans) {
         if (!fs.existsSync(pluginDataDir(plugin_id))) {
-          db.prepare('DELETE FROM plugin_user_erasure_queue WHERE plugin_id = ?').run(plugin_id);
+          this.db.prepare('DELETE FROM plugin_user_erasure_queue WHERE plugin_id = ?').run(plugin_id);
         }
       }
       // Only ACTIVE plugins can be delivered to; scope the window to them so a backlog
@@ -317,13 +326,13 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
       const active = this.supervisor.activeIds();
       if (active.length === 0) return;
       const ph = active.map(() => '?').join(',');
-      const pending = db
+      const pending = this.db
         .prepare(`SELECT id, plugin_id, user_id FROM plugin_user_erasure_queue WHERE plugin_id IN (${ph}) ORDER BY id LIMIT 200`)
         .all(...active) as Array<{ id: number; plugin_id: string; user_id: number }>;
       for (const row of pending) {
         if (!this.supervisor.isActive(row.plugin_id)) continue; // retry after it reactivates
         const done = await this.supervisor.deliverUserErasure(row.plugin_id, row.user_id);
-        if (done) db.prepare('DELETE FROM plugin_user_erasure_queue WHERE id = ?').run(row.id);
+        if (done) this.db.prepare('DELETE FROM plugin_user_erasure_queue WHERE id = ?').run(row.id);
       }
     } catch {
       /* a drain pass must never break the runtime */
@@ -336,7 +345,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   async exportUserData(userId: number): Promise<Array<{ pluginId: string; data?: unknown; pending?: boolean; settings?: Record<string, unknown>; oauthConnected?: boolean }>> {
     const out: Array<{ pluginId: string; data?: unknown; pending?: boolean; settings?: Record<string, unknown>; oauthConnected?: boolean }> = [];
     if (!pluginsEnabled()) return out;
-    const rows = db.prepare('SELECT id, permissions FROM plugins').all() as Array<{ id: string; permissions: string | null }>;
+    const rows = this.db.prepare('SELECT id, permissions FROM plugins').all() as Array<{ id: string; permissions: string | null }>;
     for (const r of rows) {
       if (this.supervisor.isActive(r.id)) {
         const res = await this.supervisor.collectUserExport(r.id, userId);
@@ -356,7 +365,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     // Fold in the host-side per-user data TREK stores itself (what erasePluginUserData
     // deletes) so an access request isn't asymmetric with erasure: the user's plugin
     // settings (secret fields masked) and which plugins they OAuth-linked. Raw tokens
-    // are never exported. This is supplementary to each plugin's own-db export above, so
+    // are never exported. This is supplementary to each plugin's own-this.db export above, so
     // an unexpected failure here must not drop that primary data — it's best-effort.
     try {
       const byId = new Map(out.map((o) => [o.pluginId, o]));
@@ -366,12 +375,12 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
         return e;
       };
       const secretKeys = new Map<string, Set<string>>();
-      for (const f of db.prepare("SELECT plugin_id, field_key FROM plugin_settings_fields WHERE scope = 'user' AND secret = 1").all() as Array<{ plugin_id: string; field_key: string }>) {
+      for (const f of this.db.prepare("SELECT plugin_id, field_key FROM plugin_settings_fields WHERE scope = 'user' AND secret = 1").all() as Array<{ plugin_id: string; field_key: string }>) {
         let s = secretKeys.get(f.plugin_id);
         if (!s) { s = new Set(); secretKeys.set(f.plugin_id, s); }
         s.add(f.field_key);
       }
-      for (const c of db.prepare('SELECT plugin_id, config FROM plugin_user_config WHERE user_id = ?').all(userId) as Array<{ plugin_id: string; config: string }>) {
+      for (const c of this.db.prepare('SELECT plugin_id, config FROM plugin_user_config WHERE user_id = ?').all(userId) as Array<{ plugin_id: string; config: string }>) {
         let cfg: Record<string, unknown> = {};
         try { cfg = JSON.parse(c.config || '{}'); } catch { /* ignore */ }
         const secrets = secretKeys.get(c.plugin_id) ?? new Set<string>();
@@ -379,7 +388,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
         for (const [k, v] of Object.entries(cfg)) masked[k] = secrets.has(k) ? '***' : v;
         entryFor(c.plugin_id).settings = masked;
       }
-      for (const t of db.prepare('SELECT DISTINCT plugin_id FROM plugin_oauth_tokens WHERE user_id = ?').all(userId) as Array<{ plugin_id: string }>) {
+      for (const t of this.db.prepare('SELECT DISTINCT plugin_id FROM plugin_oauth_tokens WHERE user_id = ?').all(userId) as Array<{ plugin_id: string }>) {
         entryFor(t.plugin_id).oauthConnected = true;
       }
     } catch (err) {
@@ -395,7 +404,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    * requires. Returns the ids actually deactivated.
    */
   async deactivateForDisabledAddon(addonId: string): Promise<string[]> {
-    const rows = db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
+    const rows = this.db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
     const directlyAffected = rows
       .filter((r) => r.enabled && parseDependencies(r.dependencies).requiredAddons.includes(addonId))
       .map((r) => r.id);
@@ -409,7 +418,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** Re-scan the plugins volume on demand (admin action). */
   rescan(): { discovered: string[]; skipped: string[] } {
-    return discoverPlugins(db);
+    return discoverPlugins(this.db);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -457,7 +466,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** All plugin rows projected to what the dependency helpers reason over. */
   private installedDepRows(): Map<string, PluginDepRow> {
-    const rows = db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
+    const rows = this.db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
     return new Map(rows.map((r) => [r.id, r]));
   }
 
@@ -467,7 +476,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    * permission re-consent → required addon disabled → missing/mismatched plugin dependency.
    */
   private assertActivatable(id: string, installed: Map<string, PluginDepRow>, consentWiden: boolean): void {
-    const row = db.prepare('SELECT permissions, granted_permissions, dependencies, trek_range FROM plugins WHERE id = ?').get(id) as
+    const row = this.db.prepare('SELECT permissions, granted_permissions, dependencies, trek_range FROM plugins WHERE id = ?').get(id) as
       | { permissions: string; granted_permissions: string; dependencies: string | null; trek_range: string | null }
       | undefined;
     if (!row) throw new Error(`plugin ${id} not found`);
@@ -523,13 +532,13 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** Mark a (pre-validated) plugin enabled and spawn its child. */
   private async spawnActivated(id: string): Promise<void> {
-    const row = db.prepare('SELECT permissions, config FROM plugins WHERE id = ?').get(id) as
+    const row = this.db.prepare('SELECT permissions, config FROM plugins WHERE id = ?').get(id) as
       | { permissions: string; config: string }
       | undefined;
     if (!row) throw new Error(`plugin ${id} not found`);
     const declared = parseArray(row.permissions).filter(isKnownPermission);
     // Mark it enabled (admin intent) so it reboots after restarts/crashes.
-    db.prepare('UPDATE plugins SET granted_permissions = ?, enabled = 1 WHERE id = ?').run(JSON.stringify(declared), id);
+    this.db.prepare('UPDATE plugins SET granted_permissions = ?, enabled = 1 WHERE id = ?').run(JSON.stringify(declared), id);
     const config = decryptConfig(parseObject(row.config));
     const manifestHosts = declared.filter((p) => p.startsWith(HTTP_OUTBOUND)).map((p) => p.slice(HTTP_OUTBOUND.length));
     // Union in the hosts the ADMIN added post-install. A plugin that talks to a
@@ -550,7 +559,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** Does this plugin's manifest declare that it needs operator-supplied hosts? */
   wantsOperatorEgress(id: string): boolean {
-    const row = db.prepare('SELECT operator_egress FROM plugins WHERE id = ?').get(id) as { operator_egress: number } | undefined;
+    const row = this.db.prepare('SELECT operator_egress FROM plugins WHERE id = ?').get(id) as { operator_egress: number } | undefined;
     return row?.operator_egress === 1;
   }
 
@@ -572,9 +581,9 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (host === '*' || !EGRESS_HOST_RE.test(host)) throw new ForbiddenResource(`invalid host "${raw}"`);
       if (!clean.includes(host)) clean.push(host);
     }
-    db.transaction(() => {
-      db.prepare('DELETE FROM plugin_egress_hosts WHERE plugin_id = ?').run(id);
-      const ins = db.prepare('INSERT OR IGNORE INTO plugin_egress_hosts (plugin_id, host) VALUES (?, ?)');
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM plugin_egress_hosts WHERE plugin_id = ?').run(id);
+      const ins = this.db.prepare('INSERT OR IGNORE INTO plugin_egress_hosts (plugin_id, host) VALUES (?, ?)');
       for (const h of clean) ins.run(id, h);
     })();
     // Re-spawn so a live child actually gets the new allow-list.
@@ -588,7 +597,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   async deactivate(id: string): Promise<void> {
     await this.supervisor.disable(id);
     closePluginDataDb(id);
-    db.prepare("UPDATE plugins SET status = 'inactive', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+    this.db.prepare("UPDATE plugins SET status = 'inactive', enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
   }
 
   /**
@@ -601,7 +610,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    * restart of update()/sideload() never disables a plugin's dependents.
    */
   async deactivateWithDependents(id: string): Promise<string[]> {
-    const rows = db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
+    const rows = this.db.prepare('SELECT id, version, enabled, dependencies FROM plugins').all() as PluginDepRow[];
     const enabledById = new Map(rows.map((r) => [r.id, r.enabled]));
     // findDependentsTransitive returns nearest-first; reverse so the deepest dependent
     // (the furthest caller) stops before the plugin it depends on.
@@ -623,7 +632,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    * currently-running child untouched (it keeps serving the old code from memory).
    */
   async update(id: string, opts?: { version?: string; retrustKey?: string }): Promise<{ version: string; activated: boolean; newPermissions: string[]; newEgress: string[] }> {
-    const before = db.prepare('SELECT enabled, granted_permissions, version FROM plugins WHERE id = ?').get(id) as
+    const before = this.db.prepare('SELECT enabled, granted_permissions, version FROM plugins WHERE id = ?').get(id) as
       | { enabled: number; granted_permissions: string; version: string | null }
       | undefined;
     if (!before) throw new Error(`plugin ${id} not found`);
@@ -642,7 +651,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     const res = await this.registry.install(id, { version: target, retrustKey: opts?.retrustKey });
 
     const declared = parseArray(
-      (db.prepare('SELECT permissions FROM plugins WHERE id = ?').get(id) as { permissions: string }).permissions,
+      (this.db.prepare('SELECT permissions FROM plugins WHERE id = ?').get(id) as { permissions: string }).permissions,
     ).filter(isKnownPermission);
     const newGrants = declared.filter((p) => !granted.has(p));
     const newEgress = newGrants.filter((p) => p.startsWith(HTTP_OUTBOUND)).map((p) => p.slice(HTTP_OUTBOUND.length)).filter(Boolean);
@@ -700,7 +709,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     actor: { userId: number | null; ip?: string | null },
   ): Promise<{ version: string; activated: boolean; newPermissions: string[]; newEgress: string[] }> {
     if (!this.registry) throw new Error('registry service unavailable');
-    const before = db.prepare('SELECT author_pubkey FROM plugins WHERE id = ?').get(id) as { author_pubkey?: string | null } | undefined;
+    const before = this.db.prepare('SELECT author_pubkey FROM plugins WHERE id = ?').get(id) as { author_pubkey?: string | null } | undefined;
     const entry = await this.registry.assertRetrustable(id, publicKey); // throws unless SIGNATURE_KEY_CHANGED
 
     const res = await this.update(id, { version, retrustKey: publicKey });
@@ -735,7 +744,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!this.registry) throw new Error('registry service unavailable');
     const staged = this.registry.stageUpload(bytes);
     try {
-      const replaced = !!db.prepare('SELECT id FROM plugins WHERE id = ?').get(staged.id);
+      const replaced = !!this.db.prepare('SELECT id FROM plugins WHERE id = ?').get(staged.id);
       // Force any replaced plugin INACTIVE before the swap: stop a running child
       // (it holds file locks and would keep executing stale code) AND clear the
       // active flag, so replaced code can never keep running — or even show active
@@ -772,7 +781,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (scanForNativeBinaries(sourceDir).length) throw new Error('directory contains native binaries');
 
     const id = manifest.id;
-    const existing = db.prepare('SELECT source_repo FROM plugins WHERE id = ?').get(id) as { source_repo?: string } | undefined;
+    const existing = this.db.prepare('SELECT source_repo FROM plugins WHERE id = ?').get(id) as { source_repo?: string } | undefined;
     // Never clobber a REAL installed plugin (registry/sideload) — only re-point a link.
     if (existing && existing.source_repo !== DEV_LINK_SOURCE) {
       throw new Error(`a plugin '${id}' is already installed — uninstall it before dev-linking that id`);
@@ -785,10 +794,10 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     removePluginCodeEntry(dest); // drop any prior link — never follows into the author's source
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.symlinkSync(sourceDir, dest, 'junction'); // Windows junction (no elevation); POSIX ignores the type -> dir symlink
-    discoverPlugins(db); // registers/updates the row from the linked manifest, INACTIVE
+    discoverPlugins(this.db); // registers/updates the row from the linked manifest, INACTIVE
     // Same as a sideload: the plugin has left the registry trust model, so a block that
     // described a refused REGISTRY update no longer describes the code that will run.
-    db.prepare(
+    this.db.prepare(
       `UPDATE plugins SET source_repo = ?, source_commit = NULL, sha256 = NULL, author_pubkey = NULL,
                           update_block_code = NULL, update_block_detail = NULL, update_block_version = NULL,
                           status = 'inactive', enabled = 0
@@ -807,7 +816,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
    */
   async reload(id: string): Promise<void> {
     if (!devLinkEnabled()) throw new Error('dev-link is disabled (set TREK_PLUGINS_DEV_LINK=1)');
-    const row = db.prepare('SELECT source_repo FROM plugins WHERE id = ?').get(id) as { source_repo?: string } | undefined;
+    const row = this.db.prepare('SELECT source_repo FROM plugins WHERE id = ?').get(id) as { source_repo?: string } | undefined;
     if (!row) throw new Error(`plugin ${id} not found`);
     if (row.source_repo !== DEV_LINK_SOURCE) throw new Error(`plugin ${id} is not dev-linked`);
     const wasActive = this.isActive(id);
@@ -851,16 +860,16 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     // Code always goes; the DB metadata + fields go so it disappears from the UI.
     // Link-safe: a dev-linked plugin only drops the symlink, never the author's source.
     removePluginCodeEntry(pluginCodeDir(id));
-    db.prepare('DELETE FROM plugins WHERE id = ?').run(id);
-    db.prepare('DELETE FROM plugin_settings_fields WHERE plugin_id = ?').run(id);
-    try { db.prepare('DELETE FROM plugin_actions WHERE plugin_id = ?').run(id); } catch { /* table absent */ }
+    this.db.prepare('DELETE FROM plugins WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM plugin_settings_fields WHERE plugin_id = ?').run(id);
+    try { this.db.prepare('DELETE FROM plugin_actions WHERE plugin_id = ?').run(id); } catch { /* table absent */ }
     // The admin's egress consent dies with the plugin. Unconditional: leaving it would
     // silently grant a LATER plugin that reuses this id the hosts the admin approved for
     // a different one.
-    try { db.prepare('DELETE FROM plugin_egress_hosts WHERE plugin_id = ?').run(id); } catch { /* table absent */ }
+    try { this.db.prepare('DELETE FROM plugin_egress_hosts WHERE plugin_id = ?').run(id); } catch { /* table absent */ }
     // Scheduled tasks are operational (not user data), so they go unconditionally —
     // a scheduled callback for a plugin that no longer exists must never fire.
-    db.prepare('DELETE FROM plugin_scheduled_tasks WHERE plugin_id = ?').run(id);
+    this.db.prepare('DELETE FROM plugin_scheduled_tasks WHERE plugin_id = ?').run(id);
     // If it was a notification channel, retire the channel too. Unconditional, for the
     // same reason as the settings fields: these are TREK's config ABOUT the plugin, and
     // leaving them means a later plugin that reuses this id silently inherits every
@@ -868,23 +877,23 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.retireNotificationChannel(id);
     if (deleteData) {
       removePluginData(id);
-      db.prepare('DELETE FROM plugin_error_log WHERE plugin_id = ?').run(id);
-      db.prepare("DELETE FROM settings WHERE key LIKE ?").run(`plugin:${id}:%`);
-      db.prepare('DELETE FROM plugin_entity_metadata WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_error_log WHERE plugin_id = ?').run(id);
+      this.db.prepare("DELETE FROM settings WHERE key LIKE ?").run(`plugin:${id}:%`);
+      this.db.prepare('DELETE FROM plugin_entity_metadata WHERE plugin_id = ?').run(id);
       // Per-user secrets + OAuth tokens/state live in their own tables, NOT under
       // settings — without these a "delete all data" leaves encrypted API keys and
       // refresh tokens behind, silently re-adopted if a plugin with the same id is
       // reinstalled. The migration ledger goes too, so a reinstall re-runs cleanly.
-      db.prepare('DELETE FROM plugin_user_config WHERE plugin_id = ?').run(id);
-      db.prepare('DELETE FROM plugin_oauth_tokens WHERE plugin_id = ?').run(id);
-      db.prepare('DELETE FROM plugin_oauth_state WHERE plugin_id = ?').run(id);
-      db.prepare('DELETE FROM plugin_meta_migrations WHERE plugin_id = ?').run(id);
-      db.prepare('DELETE FROM plugin_capability_audit WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_user_config WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_oauth_tokens WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_oauth_state WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_meta_migrations WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_capability_audit WHERE plugin_id = ?').run(id);
       // The plugin's data dir is gone now, so any pending GDPR erasure for it is moot.
       // But when deleteData is FALSE we deliberately KEEP the queue rows: the data dir
       // (which may still hold a deleted user's rows) survives, so the erasure obligation
       // must survive too — a reinstall of the same id drains the queue and honours it.
-      db.prepare('DELETE FROM plugin_user_erasure_queue WHERE plugin_id = ?').run(id);
+      this.db.prepare('DELETE FROM plugin_user_erasure_queue WHERE plugin_id = ?').run(id);
     }
   }
 
@@ -894,7 +903,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** Declared outbound hosts (from http:outbound:<host> grants) for the frame CSP. */
   outboundHostsOf(id: string): string[] {
-    const row = db.prepare('SELECT granted_permissions FROM plugins WHERE id = ?').get(id) as
+    const row = this.db.prepare('SELECT granted_permissions FROM plugins WHERE id = ?').get(id) as
       | { granted_permissions: string }
       | undefined;
     if (!row) return [];
@@ -972,8 +981,8 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   /** True if `caller` declares `target` as a plugin dependency whose range the
    * installed target version satisfies. */
   private dependsOnSatisfied(callerId: string, targetId: string): boolean {
-    const caller = db.prepare('SELECT dependencies FROM plugins WHERE id = ?').get(callerId) as { dependencies: string | null } | undefined;
-    const target = db.prepare('SELECT version FROM plugins WHERE id = ?').get(targetId) as { version: string | null } | undefined;
+    const caller = this.db.prepare('SELECT dependencies FROM plugins WHERE id = ?').get(callerId) as { dependencies: string | null } | undefined;
+    const target = this.db.prepare('SELECT version FROM plugins WHERE id = ?').get(targetId) as { version: string | null } | undefined;
     if (!caller || !target) return false;
     const dep = parseDependencies(caller.dependencies).pluginDependencies.find((d) => d.id === targetId);
     if (!dep) return false;
@@ -993,7 +1002,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
     // without the notification tables (a slimmed test app that imports only the plugin
     // module).
     try {
-      db.prepare('DELETE FROM notification_channel_preferences WHERE channel = ?').run(pluginChannelId(id));
+      this.db.prepare('DELETE FROM notification_channel_preferences WHERE channel = ?').run(pluginChannelId(id));
     } catch { /* no notifications schema here — nothing to retire */ }
   }
 
@@ -1009,7 +1018,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   notificationChannels(): ExternalChannel[] {
     if (!pluginsEnabled()) return [];
     return this.supervisor.providersOf('notificationChannel').map((id) => {
-      const row = db.prepare('SELECT name, capabilities FROM plugins WHERE id = ?').get(id) as
+      const row = this.db.prepare('SELECT name, capabilities FROM plugins WHERE id = ?').get(id) as
         | { name: string; capabilities: string }
         | undefined;
       let cap: { title?: string; events?: string[] } = {};
@@ -1061,7 +1070,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
   actionsOf(id: string): Array<{ key: string; label: string; hint?: string; danger: boolean }> {
     try {
       return (
-        db.prepare('SELECT action_key, label, hint, danger FROM plugin_actions WHERE plugin_id = ? ORDER BY sort_order').all(id) as Array<{
+        this.db.prepare('SELECT action_key, label, hint, danger FROM plugin_actions WHERE plugin_id = ? ORDER BY sort_order').all(id) as Array<{
           action_key: string; label: string; hint: string | null; danger: number;
         }>
       ).map((r) => ({ key: r.action_key, label: r.label, hint: r.hint ?? undefined, danger: r.danger === 1 }));
@@ -1097,7 +1106,7 @@ export class PluginRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   /** A plugin's declared `capabilities.provides`/`capabilities.emits` (from the DB). */
   private capabilityList(id: string, field: 'provides' | 'emits'): string[] {
-    const row = db.prepare('SELECT capabilities FROM plugins WHERE id = ?').get(id) as { capabilities: string } | undefined;
+    const row = this.db.prepare('SELECT capabilities FROM plugins WHERE id = ?').get(id) as { capabilities: string } | undefined;
     if (!row) return [];
     try {
       const c = JSON.parse(row.capabilities || '{}') as Record<string, unknown>;

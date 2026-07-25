@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { checkSsrf, createPinnedDispatcher } from '../utils/ssrfGuard';
 import { decrypt_api_key } from './apiKeyCrypto';
@@ -50,11 +51,12 @@ function getAppSetting(key: string): string | null {
 }
 
 function getSmtpConfig(): SmtpConfig | null {
-  const host = process.env.SMTP_HOST || getAppSetting('smtp_host');
-  const port = process.env.SMTP_PORT || getAppSetting('smtp_port');
-  const user = process.env.SMTP_USER || getAppSetting('smtp_user');
-  const pass = process.env.SMTP_PASS || decrypt_api_key(getAppSetting('smtp_pass')) || '';
-  const from = process.env.SMTP_FROM || getAppSetting('smtp_from');
+  const smtpEnv = readEnv().smtp;
+  const host = smtpEnv.host || getAppSetting('smtp_host');
+  const port = smtpEnv.port || getAppSetting('smtp_port');
+  const user = smtpEnv.user || getAppSetting('smtp_user');
+  const pass = smtpEnv.pass || decrypt_api_key(getAppSetting('smtp_pass')) || '';
+  const from = smtpEnv.from || getAppSetting('smtp_from');
   if (!host || !port || !from) return null;
   return {
     host,
@@ -68,13 +70,14 @@ function getSmtpConfig(): SmtpConfig | null {
 
 // Exported for use by notificationService
 export function getAppUrl(): string {
-  if (process.env.APP_URL) {
+  const appUrl = readEnv().app.appUrl;
+  if (appUrl) {
     try {
-      const _ = new URL(process.env.APP_URL);
-      return process.env.APP_URL.replace(/\/+$/, '');
+      const _ = new URL(appUrl);
+      return appUrl.replace(/\/+$/, '');
     } catch (_ignored) {}
   }
-  const origins = process.env.ALLOWED_ORIGINS;
+  const origins = readEnv().http.allowedOriginsRaw;
   if (origins) {
     const first = origins.split(',')[0]?.trim();
     if (first) {
@@ -84,7 +87,7 @@ export function getAppUrl(): string {
       } catch (_ignored) {}
     }
   }
-  const port = Number(process.env.PORT) || 3001;
+  const port = readEnv().app.port;
   return `http://localhost:${port}`;
 }
 
@@ -101,13 +104,13 @@ export function getMcpSafeUrl(): string {
   } catch {
     // candidate was somehow invalid — fall through to localhost
   }
-  const port = Number(process.env.PORT) || 3001;
+  const port = readEnv().app.port;
   return `http://localhost:${port}`;
 }
 
 /** Is SMTP configured at the instance level? (Independent of any one user's address.) */
 export function isSmtpConfigured(): boolean {
-  return !!(process.env.SMTP_HOST || getAppSetting('smtp_host'));
+  return !!(readEnv().smtp.host || getAppSetting('smtp_host'));
 }
 
 export function getUserEmail(userId: number): string | null {
@@ -277,7 +280,7 @@ export async function sendPasswordResetEmail(
   }
 
   try {
-    const skipTls = process.env.SMTP_SKIP_TLS_VERIFY === 'true' || getAppSetting('smtp_skip_tls_verify') === 'true';
+    const skipTls = readEnv().smtp.skipTlsVerify || getAppSetting('smtp_skip_tls_verify') === 'true';
     const transporter = nodemailer.createTransport({
       host: smtpCfg.host,
       port: smtpCfg.port,
@@ -313,7 +316,7 @@ export async function sendEmail(
   const lang = userId ? getUserLanguage(userId) : 'en';
 
   try {
-    const skipTls = process.env.SMTP_SKIP_TLS_VERIFY === 'true' || getAppSetting('smtp_skip_tls_verify') === 'true';
+    const skipTls = readEnv().smtp.skipTlsVerify || getAppSetting('smtp_skip_tls_verify') === 'true';
     const transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
@@ -411,7 +414,7 @@ export async function testSmtp(to: string): Promise<{ success: boolean; error?: 
   if (!getSmtpConfig()) return { success: false, error: 'SMTP not configured' };
   try {
     const config = getSmtpConfig()!;
-    const skipTls = process.env.SMTP_SKIP_TLS_VERIFY === 'true' || getAppSetting('smtp_skip_tls_verify') === 'true';
+    const skipTls = readEnv().smtp.skipTlsVerify || getAppSetting('smtp_skip_tls_verify') === 'true';
     const transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
@@ -513,7 +516,7 @@ export function resolveAdminNtfyUrl(adminCfg: NtfyConfig): string | null {
 
 function encodeHeaderValue(value: string): string {
   for (let i = 0; i < value.length; i++) {
-    if (value.charCodeAt(i) > 0xff) {
+    if (value.charCodeAt(i) > 0x7f) {
       return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
     }
   }

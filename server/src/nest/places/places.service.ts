@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { broadcast } from '../../websocket';
-import { canAccessTrip } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
 import * as svc from '../../services/placeService';
@@ -16,8 +16,10 @@ type Trip = { user_id: number };
  */
 @Injectable()
 export class PlacesService {
+  constructor(private readonly dbs: DatabaseService) {}
+
   verifyTripAccess(tripId: string, userId: number) {
-    return canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
+    return this.dbs.canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
   }
 
   canEdit(trip: Trip, user: User): boolean {
@@ -78,6 +80,10 @@ export class PlacesService {
 
   searchImage(tripId: string, id: string, userId: number) {
     return svc.searchPlaceImage(tripId, id, userId);
+  }
+
+  rate(tripId: string, id: string, userId: number, rating: number | null) {
+    return svc.ratePlace(tripId, id, userId, rating);
   }
 
   // Journey hooks — non-fatal, mirroring the route's try/catch wrappers.

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { broadcast } from '../../websocket';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
@@ -15,6 +15,12 @@ type Trip = NonNullable<ReturnType<typeof svc.verifyTripAccess>>;
  */
 @Injectable()
 export class BudgetService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   verifyTripAccess(tripId: string, userId: number) {
     return svc.verifyTripAccess(tripId, userId);
   }
@@ -106,14 +112,14 @@ export class BudgetService {
    */
   syncReservationPrice(tripId: string, reservationId: number, totalPrice: number, socketId: string | undefined): void {
     try {
-      const reservation = db.prepare(
+      const reservation = this.db.prepare(
         'SELECT id, metadata FROM reservations WHERE id = ? AND trip_id = ?',
       ).get(reservationId, tripId) as { id: number; metadata: string | null } | undefined;
       if (!reservation) return;
       const meta = reservation.metadata ? JSON.parse(reservation.metadata) : {};
       meta.price = String(totalPrice);
-      db.prepare('UPDATE reservations SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), reservation.id);
-      const updatedRes = db.prepare('SELECT * FROM reservations WHERE id = ?').get(reservation.id);
+      this.db.prepare('UPDATE reservations SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), reservation.id);
+      const updatedRes = this.db.prepare('SELECT * FROM reservations WHERE id = ?').get(reservation.id);
       broadcast(tripId, 'reservation:updated', { reservation: updatedRes }, socketId);
     } catch (err) {
       console.error('[budget] Failed to sync price to reservation:', err);

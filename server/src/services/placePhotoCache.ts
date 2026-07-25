@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 
 import { Jimp, JimpMime } from 'jimp';
@@ -8,7 +9,7 @@ import path from 'node:path';
 
 // Overridable for tests (mirrors the TREK_DB_FILE seam) so the suite never touches
 // the real uploads tree.
-const GOOGLE_PHOTO_DIR = process.env.TREK_PLACE_PHOTO_DIR || path.join(__dirname, '../../uploads/photos/google');
+const GOOGLE_PHOTO_DIR = readEnv().paths.placePhotoDir || path.join(__dirname, '../../uploads/photos/google');
 const ERROR_TTL = 5 * 60 * 1000;
 
 // Marker photos are displayed tiny — cap stored images so an oversized source

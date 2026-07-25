@@ -1,4 +1,5 @@
 import { ADDON_IDS } from '../addons';
+import { readEnv } from '../app-config';
 import { updateJwtSecret } from '../config';
 import { db } from '../db/database';
 import { revokeUserSessions, revokeUserSessionsForClient } from '../mcp';
@@ -349,7 +350,7 @@ export function updateOidcSettings(data: {
 // ── Demo Baseline ──────────────────────────────────────────────────────────
 
 export function saveDemoBaseline(): { error?: string; status?: number; message?: string } {
-  if (process.env.DEMO_MODE?.toLowerCase() !== 'true') {
+  if (!readEnv().demo.enabled) {
     return { error: 'Not found', status: 404 };
   }
   try {
@@ -399,7 +400,7 @@ export async function checkVersion(): Promise<VersionInfo> {
     return _versionCache.data;
   }
 
-  const currentVersion: string = process.env.APP_VERSION || require('../../package.json').version;
+  const currentVersion: string = readEnv().app.appVersion || require('../../package.json').version;
   const isPrerelease = currentVersion.includes('-pre.');
   const fallback: VersionInfo = {
     current: currentVersion,

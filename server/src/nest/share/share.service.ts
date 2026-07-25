@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { canAccessTrip } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
+import type { TripAccess } from '../database/database.service';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
 import * as svc from '../../services/shareService';
 
-type Trip = NonNullable<ReturnType<typeof canAccessTrip>>;
+type Trip = TripAccess;
 
 /**
  * Thin Nest wrapper around the existing share service. Trip access, the
@@ -12,8 +13,10 @@ type Trip = NonNullable<ReturnType<typeof canAccessTrip>>;
  */
 @Injectable()
 export class ShareService {
+  constructor(private readonly dbs: DatabaseService) {}
+
   verifyTripAccess(tripId: string, userId: number) {
-    return canAccessTrip(tripId, userId);
+    return this.dbs.canAccessTrip(tripId, userId);
   }
 
   canManage(trip: Trip, user: User): boolean {

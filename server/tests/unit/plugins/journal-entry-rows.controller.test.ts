@@ -17,6 +17,8 @@ vi.mock('../../../src/db/database', () => ({
   db: { prepare: () => ({ get: (entryId: number) => entryJourney(entryId) }) },
   canAccessTrip: vi.fn(),
 }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 vi.mock('../../../src/services/journeyService', () => ({ canAccessJourney }));
 vi.mock('../../../src/services/adminService', () => ({ isAddonEnabled }));
 vi.mock('../../../src/nest/plugins/kill-switch', () => ({ pluginsEnabled }));
@@ -31,7 +33,7 @@ function controller(invoke: (id: string) => unknown, providers = ['p1']) {
     providersOf: vi.fn(() => providers),
     invokeHook: vi.fn(async (id: string) => invoke(id)),
   } as unknown as PluginRuntimeService;
-  return { c: new JournalEntryRowsController(runtime), runtime };
+  return { c: new JournalEntryRowsController(runtime, new DatabaseService(dbConn)), runtime };
 }
 const row = (over: Record<string, unknown> = {}) => ({ label: 'Distance', value: '12 km', ...over });
 

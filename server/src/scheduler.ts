@@ -1,5 +1,6 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import archiver from 'archiver';
+import { readEnv } from './app-config';
 import path from 'node:path';
 import fs from 'node:fs';
 import { logInfo, logError } from './services/auditLog';
@@ -131,7 +132,7 @@ function start(): void {
   }
 
   const expression = buildCronExpression(settings);
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   currentTask = cron.schedule(expression, runBackup, { timezone: tz });
   logInfo(`Auto-Backup scheduled: ${settings.interval} (${expression}), tz: ${tz}, retention: ${settings.keep_days === 0 ? 'forever' : settings.keep_days + ' days'}`);
 }
@@ -141,7 +142,7 @@ let demoTask: ScheduledTask | null = null;
 
 function startDemoReset(): void {
   if (demoTask) { demoTask.stop(); demoTask = null; }
-  if (process.env.DEMO_MODE?.toLowerCase() !== 'true') return;
+  if (!readEnv().demo.enabled) return;
 
   demoTask = cron.schedule('0 * * * *', () => {
     try {
@@ -177,7 +178,7 @@ function startTripReminders(): void {
     return;
   }
 
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   reminderTask = cron.schedule('0 9 * * *', async () => {
     try {
       const { db } = require('./db/database');
@@ -223,7 +224,7 @@ function startTodoReminders(): void {
   }
   logInfo(`Todo due reminders: enabled (lead ${TODO_REMINDER_LEAD_DAYS}d)`);
 
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   todoReminderTask = cron.schedule('0 9 * * *', async () => {
     try {
       const { send } = require('./services/notificationService');
@@ -280,7 +281,7 @@ let versionCheckTask: ScheduledTask | null = null;
 function startVersionCheck(): void {
   if (versionCheckTask) { versionCheckTask.stop(); versionCheckTask = null; }
 
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   versionCheckTask = cron.schedule('0 9 * * *', async () => {
     try {
       const { checkAndNotifyVersion } = require('./services/adminService');
@@ -296,13 +297,11 @@ function startVersionCheck(): void {
 // queued mutations with their X-Idempotency-Key when it reconnects, so a key
 // GC'd before the device comes back online would let the replay create a
 // duplicate. 24h was far too short for a multi-day offline trip; default 30d,
-// overridable via IDEMPOTENCY_TTL_SECONDS.
-const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+// overridable via IDEMPOTENCY_TTL_SECONDS (default lives in app-config).
 let idempotencyCleanupTask: ScheduledTask | null = null;
 
 function idempotencyTtlSeconds(): number {
-  const n = Number(process.env.IDEMPOTENCY_TTL_SECONDS);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_IDEMPOTENCY_TTL_SECONDS;
+  return readEnv().session.idempotencyTtlSeconds;
 }
 
 interface PurgeDb {
@@ -324,7 +323,7 @@ function purgeExpiredIdempotencyKeys(
 function startIdempotencyCleanup(): void {
   if (idempotencyCleanupTask) { idempotencyCleanupTask.stop(); idempotencyCleanupTask = null; }
 
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   idempotencyCleanupTask = cron.schedule('0 3 * * *', () => {
     try {
       const removed = purgeExpiredIdempotencyKeys();
@@ -379,7 +378,7 @@ function startPlacePhotoCacheCleanup(): void {
   // Run once on startup to reclaim orphans left over from before this sweeper existed.
   sweep();
 
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   placePhotoCacheTask = cron.schedule('30 3 * * *', sweep, { timezone: tz });
 }
 
@@ -395,7 +394,7 @@ function startAirTrailSync(): void {
   const getSetting = (key: string) => (db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
   const raw = parseInt(getSetting('airtrail_poll_interval_minutes') || '5', 10);
   const minutes = Number.isFinite(raw) && raw >= 1 && raw <= 59 ? raw : 5;
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   logInfo(`AirTrail sync: scheduled every ${minutes}m`);
 
   airtrailSyncTask = cron.schedule(`*/${minutes} * * * *`, async () => {

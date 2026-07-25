@@ -17,6 +17,8 @@ const { testDb, dbMock } = vi.hoisted(() => {
   return { testDb: db, dbMock: { db, closeDb: () => {}, reinitialize: () => {}, canAccessTrip: () => null } };
 });
 vi.mock('../../../src/db/database', () => dbMock);
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 vi.mock('../../../src/config', () => ({ JWT_SECRET: 'x'.repeat(40), ENCRYPTION_KEY: 'a'.repeat(64), updateJwtSecret: () => {} }));
 
 import { createTables } from '../../../src/db/schema';
@@ -120,7 +122,7 @@ describe('a plugin channel label is bounded by the host', () => {
        VALUES ('loud', 'Loud', 'active', 1, '1.0.0', '[]', '[]', ?, '{}')`,
     ).run(JSON.stringify({ notificationChannel: { title: '🎉'.repeat(5) + 'A'.repeat(500) } }));
 
-    const rt = new PluginRuntimeService();
+    const rt = new PluginRuntimeService(new DatabaseService(dbConn));
     // Stand the plugin up as a granted, active notificationChannel provider.
     (rt as unknown as { supervisor: { running: Map<string, unknown> } }).supervisor.running.set('loud', {
       id: 'loud', status: 'active', hooks: ['notificationChannel'], granted: new Set(['hook:notification-channel']),

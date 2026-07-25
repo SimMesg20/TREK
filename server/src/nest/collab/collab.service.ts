@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { broadcast } from '../../websocket';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
@@ -14,6 +14,12 @@ type Trip = NonNullable<ReturnType<typeof svc.verifyTripAccess>>;
  */
 @Injectable()
 export class CollabService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   verifyTripAccess(tripId: string, userId: number) {
     return svc.verifyTripAccess(tripId, userId);
   }
@@ -54,7 +60,7 @@ export class CollabService {
   /** Fire-and-forget collab notification (mirrors the route's dynamic import). */
   notifyCollab(tripId: string, actor: User, preview?: string): void {
     import('../../services/notificationService').then(({ send }) => {
-      const tripInfo = db.prepare('SELECT title FROM trips WHERE id = ?').get(tripId) as { title: string } | undefined;
+      const tripInfo = this.db.prepare('SELECT title FROM trips WHERE id = ?').get(tripId) as { title: string } | undefined;
       const params: Record<string, string> = { trip: tripInfo?.title || 'Untitled', actor: actor.email, tripId: String(tripId) };
       if (preview !== undefined) params.preview = preview;
       send({ event: 'collab_message', actorId: actor.id, scope: 'trip', targetId: Number(tripId), params }).catch(() => {});

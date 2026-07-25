@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { readEnv } from '../app-config';
 import { SESSION_DURATION_MS, SESSION_DURATION_REMEMBER_MS } from '../config';
 
 const COOKIE_NAME = 'trek_session';
@@ -28,10 +29,10 @@ export type RememberOption = boolean | undefined;
  * remains the explicit escape hatch for plain-HTTP LAN testing.
  */
 export function cookieOptions(clear = false, req?: Request, remember?: RememberOption) {
-  if (process.env.COOKIE_SECURE?.toLowerCase() === 'false') {
+  if (readEnv().http.cookieSecureDisabled) {
     return buildOptions(clear, false, remember);
   }
-  const envSecure = process.env.NODE_ENV?.toLowerCase() === 'production' || process.env.FORCE_HTTPS?.toLowerCase() === 'true';
+  const envSecure = readEnv().app.isProduction || readEnv().http.forceHttps;
   const requestSecure = req?.secure === true;
   return buildOptions(clear, envSecure || requestSecure, remember);
 }
@@ -62,12 +63,9 @@ function buildOptions(clear: boolean, secure: boolean, remember?: RememberOption
  * concrete fix (use HTTPS or set COOKIE_SECURE=false) instead of a bare 401.
  */
 export function willDropSecureCookie(req?: Request): boolean {
-  if (process.env.COOKIE_SECURE?.toLowerCase() === 'false') return false;
+  if (readEnv().http.cookieSecureDisabled) return false;
   if (req?.secure === true) return false;
-  return (
-    process.env.NODE_ENV?.toLowerCase() === 'production' ||
-    process.env.FORCE_HTTPS?.toLowerCase() === 'true'
-  );
+  return readEnv().app.isProduction || readEnv().http.forceHttps;
 }
 
 export function setAuthCookie(res: Response, token: string, req?: Request, remember?: RememberOption): void {

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { broadcast } from '../../websocket';
-import { canAccessTrip } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
 import * as svc from '../../services/assignmentService';
@@ -16,8 +16,10 @@ type Trip = { user_id: number };
  */
 @Injectable()
 export class AssignmentsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
   verifyTripAccess(tripId: string, userId: number) {
-    return canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
+    return this.dbs.canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
   }
 
   canEdit(trip: Trip, user: User): boolean {
@@ -79,6 +81,10 @@ export class AssignmentsService {
 
   updateTime(id: string, placeTime: unknown, endTime: unknown) {
     return svc.updateTime(id, placeTime as never, endTime as never);
+  }
+
+  setLegTransportMode(id: string, mode: string | null) {
+    return svc.setLegTransportMode(id, mode);
   }
 
   setParticipants(id: string, userIds: number[]) {

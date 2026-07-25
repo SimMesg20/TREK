@@ -20,6 +20,7 @@ import { diskStorage } from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { readEnv } from '../../app-config';
 import type { User } from '../../types';
 import { FilesService } from './files.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -106,7 +107,7 @@ export class FilesController {
     const cleanup = () => { if (file?.path) { try { fs.unlinkSync(file.path); } catch { /* best-effort */ } } };
     try {
       const trip = this.requireTrip(tripId, user);
-      if (process.env.DEMO_MODE?.toLowerCase() === 'true' && isDemoEmail(user.email)) {
+      if (readEnv().demo.enabled && isDemoEmail(user.email)) {
         throw new HttpException({ error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' }, 403);
       }
       if (!this.files.can('file_upload', trip, user)) {

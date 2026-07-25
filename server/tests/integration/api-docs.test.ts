@@ -66,7 +66,7 @@ describe('API-DOCS (#1412) — flag-gated OpenAPI surface', () => {
     testDb.close();
   });
 
-  it('DOCS-001 — the kill switch parses the env strictly', () => {
+  it('DOCS-001 — the kill switch parses the boolean-like env family', () => {
     const prev = process.env.TREK_API_DOCS_ENABLED;
     try {
       process.env.TREK_API_DOCS_ENABLED = 'true';
@@ -75,8 +75,9 @@ describe('API-DOCS (#1412) — flag-gated OpenAPI surface', () => {
       expect(apiDocsEnabled()).toBe(true);
       process.env.TREK_API_DOCS_ENABLED = 'false';
       expect(apiDocsEnabled()).toBe(false);
+      // '1' counts as truthy since the unified boolean coercion (app-config).
       process.env.TREK_API_DOCS_ENABLED = '1';
-      expect(apiDocsEnabled()).toBe(false);
+      expect(apiDocsEnabled()).toBe(true);
       delete process.env.TREK_API_DOCS_ENABLED;
       expect(apiDocsEnabled()).toBe(false);
     } finally {

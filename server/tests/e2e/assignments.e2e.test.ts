@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { Server } from 'http';
+import { DatabaseModule } from '../../src/nest/database/database.module';
 import { Test } from '@nestjs/testing';
 import { seedUser, sessionCookie } from './harness';
 
@@ -49,7 +50,7 @@ describe('Assignments e2e (real auth guard + temp SQLite)', () => {
   let app: Awaited<ReturnType<typeof build>>;
 
   async function build() {
-    const moduleRef = await Test.createTestingModule({ imports: [AssignmentsModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, AssignmentsModule] }).compile();
     const nest = moduleRef.createNestApplication();
     nest.use(cookieParser());
     nest.useGlobalFilters(new TrekExceptionFilter());

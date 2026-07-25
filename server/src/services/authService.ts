@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { readEnv } from '../app-config';
 import path from 'path';
 import fs from 'fs';
 import { authenticator } from 'otplib';
@@ -155,7 +156,7 @@ export function resolveAuthToggles(): {
       oidc_registration: get('oidc_registration') !== 'false',
       passkey_login,
     };
-    if (process.env.OIDC_ONLY?.toLowerCase() === 'true') {
+    if (readEnv().oidc.only) {
       result.password_login = false;
       result.password_registration = false;
     }
@@ -163,10 +164,10 @@ export function resolveAuthToggles(): {
   }
 
   // Legacy fallback
-  const oidcOnlyEnabled = process.env.OIDC_ONLY?.toLowerCase() === 'true' || get('oidc_only') === 'true';
+  const oidcOnlyEnabled = readEnv().oidc.only || get('oidc_only') === 'true';
   const oidcConfigured = !!(
-    (process.env.OIDC_ISSUER || get('oidc_issuer')) &&
-    (process.env.OIDC_CLIENT_ID || get('oidc_client_id'))
+    (readEnv().oidc.issuer || get('oidc_issuer')) &&
+    (readEnv().oidc.clientId || get('oidc_client_id'))
   );
   const oidcOnly = oidcOnlyEnabled && oidcConfigured;
   const allowReg = (get('allow_registration') ?? 'true') === 'true';
@@ -281,20 +282,20 @@ export function getPendingMfaSecret(userId: number): string | null {
 
 export function getAppConfig(authenticatedUser: { id: number } | null) {
   const userCount = (db.prepare('SELECT COUNT(*) as count FROM users WHERE COALESCE(is_guest, 0) = 0').get() as { count: number }).count;
-  const isDemo = process.env.DEMO_MODE?.toLowerCase() === 'true';
+  const isDemo = readEnv().demo.enabled;
   const toggles = resolveAuthToggles();
-  const version: string = process.env.APP_VERSION ?? require('../../package.json').version;
+  const version: string = readEnv().app.appVersion ?? require('../../package.json').version;
   const hasGoogleKey = !!db.prepare("SELECT maps_api_key FROM users WHERE role = 'admin' AND maps_api_key IS NOT NULL AND maps_api_key != '' LIMIT 1").get();
-  const oidcDisplayName = process.env.OIDC_DISPLAY_NAME ||
+  const oidcDisplayName = readEnv().oidc.displayName ||
     (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_display_name'").get() as { value: string } | undefined)?.value || null;
   const oidcConfigured = !!(
-    (process.env.OIDC_ISSUER || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_issuer'").get() as { value: string } | undefined)?.value) &&
-    (process.env.OIDC_CLIENT_ID || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_client_id'").get() as { value: string } | undefined)?.value)
+    (readEnv().oidc.issuer || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_issuer'").get() as { value: string } | undefined)?.value) &&
+    (readEnv().oidc.clientId || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_client_id'").get() as { value: string } | undefined)?.value)
   );
   const requireMfaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'require_mfa'").get() as { value: string } | undefined;
   const notifChannel = (db.prepare("SELECT value FROM app_settings WHERE key = 'notification_channel'").get() as { value: string } | undefined)?.value || 'none';
   const tripReminderSetting = (db.prepare("SELECT value FROM app_settings WHERE key = 'notify_trip_reminder'").get() as { value: string } | undefined)?.value;
-  const hasSmtpHost = !!(process.env.SMTP_HOST || (db.prepare("SELECT value FROM app_settings WHERE key = 'smtp_host'").get() as { value: string } | undefined)?.value);
+  const hasSmtpHost = !!(readEnv().smtp.host || (db.prepare("SELECT value FROM app_settings WHERE key = 'smtp_host'").get() as { value: string } | undefined)?.value);
   const notifChannelsRaw = (db.prepare("SELECT value FROM app_settings WHERE key = 'notification_channels'").get() as { value: string } | undefined)?.value || notifChannel;
   const activeChannels = notifChannelsRaw === 'none' ? [] : notifChannelsRaw.split(',').map((c: string) => c.trim()).filter(Boolean);
   const hasWebhookEnabled = activeChannels.includes('webhook');
@@ -322,7 +323,7 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
     // resolved RP ID / origin / APP_URL on this unauthenticated endpoint.
     passkey_login: toggles.passkey_login,
     passkey_configured: isPasskeyConfigured(),
-    env_override_oidc_only: process.env.OIDC_ONLY === 'true',
+    env_override_oidc_only: readEnv().oidc.only,
     has_users: userCount > 0,
     setup_complete: setupComplete,
     version,
@@ -335,7 +336,7 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
     demo_mode: isDemo,
     demo_email: isDemo ? DEMO_EMAIL_PRIMARY : undefined,
     demo_password: isDemo ? 'demo12345' : undefined,
-    timezone: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    timezone: readEnv().app.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     notification_channel: notifChannel,
     notification_channels: activeChannels,
     available_channels: { email: hasSmtpHost, webhook: hasWebhookEnabled, inapp: true },
@@ -344,7 +345,8 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
     places_autocomplete_enabled: placesAutocompleteEnabled,
     places_details_enabled: placesDetailsEnabled,
     permissions: authenticatedUser ? getAllPermissions() : undefined,
-    dev_mode: process.env.NODE_ENV === 'development',
+    // Case-sensitive on purpose (legacy parity).
+    dev_mode: readEnv().app.nodeEnv === 'development',
   };
 }
 
@@ -353,7 +355,7 @@ export function getAppConfig(authenticatedUser: { id: number } | null) {
 // ---------------------------------------------------------------------------
 
 export function demoLogin(): { error?: string; status?: number; token?: string; user?: Record<string, unknown> } {
-  if (process.env.DEMO_MODE !== 'true') {
+  if (!readEnv().demo.enabled) {
     return { error: 'Not found', status: 404 };
   }
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(DEMO_EMAIL_PRIMARY) as User | undefined;
@@ -422,7 +424,7 @@ export function registerUser(body: {
   try {
     const result = db.prepare(
       'INSERT INTO users (username, email, password_hash, role, first_seen_version, login_count) VALUES (?, ?, ?, ?, ?, 0)'
-    ).run(username, email, password_hash, role, process.env.APP_VERSION || '0.0.0');
+    ).run(username, email, password_hash, role, readEnv().app.appVersion || '0.0.0');
 
     const user = { id: result.lastInsertRowid, username, email, role, avatar: null, mfa_enabled: false };
     const token = generateToken(user);
@@ -557,7 +559,7 @@ export function changePassword(
   if (isOidcOnlyMode()) {
     return { error: 'Password authentication is disabled.', status: 403 };
   }
-  if (process.env.DEMO_MODE === 'true' && isDemoEmail(userEmail)) {
+  if (readEnv().demo.enabled && isDemoEmail(userEmail)) {
     return { error: 'Password change is disabled in demo mode.', status: 403 };
   }
 
@@ -597,7 +599,7 @@ export function changePassword(
 }
 
 export function deleteAccount(userId: number, userEmail: string, userRole: string): { error?: string; status?: number; success?: boolean } {
-  if (process.env.DEMO_MODE === 'true' && isDemoEmail(userEmail)) {
+  if (readEnv().demo.enabled && isDemoEmail(userEmail)) {
     return { error: 'Account deletion is disabled in demo mode.', status: 403 };
   }
   if (userRole === 'admin') {
@@ -890,8 +892,8 @@ export function updateAppSettings(
   if (body.password_login !== undefined || body.oidc_login !== undefined) {
     const current = resolveAuthToggles();
     const oidcConfigured = !!(
-      (process.env.OIDC_ISSUER || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_issuer'").get() as { value: string } | undefined)?.value) &&
-      (process.env.OIDC_CLIENT_ID || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_client_id'").get() as { value: string } | undefined)?.value)
+      (readEnv().oidc.issuer || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_issuer'").get() as { value: string } | undefined)?.value) &&
+      (readEnv().oidc.clientId || (db.prepare("SELECT value FROM app_settings WHERE key = 'oidc_client_id'").get() as { value: string } | undefined)?.value)
     );
     const nextPasswordLogin = body.password_login !== undefined ? (String(body.password_login) === 'true') : current.password_login;
     const nextOidcLogin = body.oidc_login !== undefined ? (String(body.oidc_login) === 'true') : current.oidc_login;
@@ -1036,7 +1038,7 @@ export function getTravelStats(userId: number) {
 // ---------------------------------------------------------------------------
 
 export function setupMfa(userId: number, userEmail: string): { error?: string; status?: number; secret?: string; otpauth_url?: string; qrPromise?: Promise<string> } {
-  if (process.env.DEMO_MODE === 'true' && isDemoEmail(userEmail)) {
+  if (readEnv().demo.enabled && isDemoEmail(userEmail)) {
     return { error: 'MFA is not available in demo mode.', status: 403 };
   }
   const row = db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get(userId) as { mfa_enabled: number } | undefined;
@@ -1085,7 +1087,7 @@ export function disableMfa(
   userEmail: string,
   body: { password?: string; code?: string }
 ): { error?: string; status?: number; success?: boolean; mfa_enabled?: boolean } {
-  if (process.env.DEMO_MODE === 'true' && isDemoEmail(userEmail)) {
+  if (readEnv().demo.enabled && isDemoEmail(userEmail)) {
     return { error: 'MFA cannot be changed in demo mode.', status: 403 };
   }
   const policy = db.prepare("SELECT value FROM app_settings WHERE key = 'require_mfa'").get() as { value: string } | undefined;
@@ -1458,7 +1460,7 @@ export function createResourceToken(userId: number, purpose?: string): { error?:
 // ---------------------------------------------------------------------------
 
 export function isDemoUser(userId: number): boolean {
-  if (process.env.DEMO_MODE !== 'true') return false;
+  if (!readEnv().demo.enabled) return false;
   const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined;
   return isDemoEmail(user?.email);
 }

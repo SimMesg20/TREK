@@ -27,6 +27,8 @@ const { testDb } = vi.hoisted(() => {
   return { testDb: db };
 });
 vi.mock('../../../src/db/database', () => ({ db: testDb, canAccessTrip: () => undefined }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 vi.mock('../../../src/websocket', () => ({ broadcast: vi.fn(), broadcastToUser: vi.fn() }));
 
 import { PluginRuntimeService } from '../../../src/nest/plugins/plugin-runtime.service';
@@ -58,7 +60,7 @@ beforeAll(() => {
   process.env.TREK_PLUGINS_DATA_DIR = dataRoot;
   process.env.TREK_PLUGINS_ENABLED = 'true';
   process.env.TREK_PLUGINS_DEV_LINK = '1';
-  runtime = new PluginRuntimeService();
+  runtime = new PluginRuntimeService(new DatabaseService(dbConn));
 });
 
 afterAll(async () => {

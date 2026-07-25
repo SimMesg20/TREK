@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import type { Addon } from '../../types';
 import { getBagTracking, getCollabFeatures } from '../../services/adminService';
 import { getPhotoProviderConfig } from '../../services/memories/helpersService';
@@ -12,11 +12,17 @@ import { getPhotoProviderConfig } from '../../services/memories/helpersService';
  */
 @Injectable()
 export class AddonsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   list() {
-    const addons = db
+    const addons = this.db
       .prepare('SELECT id, name, type, icon, enabled FROM addons WHERE enabled = 1 ORDER BY sort_order')
       .all() as Pick<Addon, 'id' | 'name' | 'type' | 'icon' | 'enabled'>[];
-    const providers = db
+    const providers = this.db
       .prepare(
         `SELECT id, name, icon, enabled, sort_order
          FROM photo_providers
@@ -24,7 +30,7 @@ export class AddonsService {
          ORDER BY sort_order, id`,
       )
       .all() as Array<{ id: string; name: string; icon: string; enabled: number; sort_order: number }>;
-    const fields = db
+    const fields = this.db
       .prepare(
         `SELECT provider_id, field_key, label, input_type, placeholder, hint, required, secret, settings_key, payload_key, sort_order
          FROM photo_provider_fields

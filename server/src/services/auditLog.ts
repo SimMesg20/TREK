@@ -1,9 +1,11 @@
 import { Request } from 'express';
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import fs from 'fs';
 import path from 'path';
 
-const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+// Frozen at import on purpose (legacy timing; tests/setup.ts sets it pre-import).
+const LOG_LEVEL = (readEnv().app.logLevel || 'info').toLowerCase();
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_LOG_FILES = 5;
 
@@ -45,7 +47,7 @@ function writeToFile(line: string): void {
 // ── Public log helpers ────────────────────────────────────────────────────
 
 function formatTs(): string {
-  const tz = process.env.TZ || 'UTC';
+  const tz = readEnv().app.tz || 'UTC';
   return new Date().toLocaleString('sv-SE', { timeZone: tz }).replace(' ', 'T');
 }
 

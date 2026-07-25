@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 
+import { readEnv } from '../../app-config';
 import { verifyJwtAndLoadUser } from '../../middleware/auth';
 import { db } from '../../db/database';
 import { mcpHandler } from '../../mcp';
@@ -56,6 +57,7 @@ export function applyPlatformUploads(app: express.Application): void {
   app.use('/uploads/avatars', express.static(path.join(UPLOADS_DIR, 'avatars')));
   app.use('/uploads/covers', express.static(path.join(UPLOADS_DIR, 'covers')));
   app.use('/uploads/journey', express.static(path.join(UPLOADS_DIR, 'journey')));
+  app.use('/uploads/places', express.static(path.join(UPLOADS_DIR, 'places')));
 
   // Photos require either a valid logged-in session (via JWT with the
   // password_version gate) OR a share token that covers the SPECIFIC
@@ -238,7 +240,8 @@ export function applyPlatformTransport(app: express.Application): void {
  */
 export function applyPlatformSpa(app: express.Application): void {
   applyPlatformStatic(app);
-  if (process.env.NODE_ENV !== 'production') return;
+  // Case-sensitive on purpose (legacy parity).
+  if (readEnv().app.nodeEnv !== 'production') return;
   // /.*/ rather than '*' so the helper is Express-4 and Express-5 safe.
   app.get(/.*/, (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -254,7 +257,8 @@ export function applyPlatformSpa(app: express.Application): void {
  * app.get catch-all; Nest: SpaFallbackFilter). No-op outside production.
  */
 export function applyPlatformStatic(app: express.Application): void {
-  if (process.env.NODE_ENV !== 'production') return;
+  // Case-sensitive on purpose (legacy parity).
+  if (readEnv().app.nodeEnv !== 'production') return;
   app.use(
     express.static(PUBLIC_DIR, {
       setHeaders: (res, filePath) => {

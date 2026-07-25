@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp';
 import { z } from 'zod';
 import { isDemoUser } from '../../services/authService';
-import { listTags, createTag, getTagByIdAndUser, updateTag, deleteTag } from '../../services/tagService';
+import { listTags, createTag, getTagByIdAndUser, updateTag, deleteTag } from '../../nest/tags/tags.bridge';
 import {
   TOOL_ANNOTATIONS_READONLY, TOOL_ANNOTATIONS_WRITE,
   TOOL_ANNOTATIONS_DELETE, TOOL_ANNOTATIONS_NON_IDEMPOTENT,

@@ -1,11 +1,13 @@
+import { readEnv } from '../../../app-config';
 import { db, canAccessTrip } from '../../../db/database';
+import { DatabaseService } from '../../database/database.service';
 import { broadcast, broadcastToUser } from '../../../websocket';
 import { listBudgetItems } from '../../../services/budgetService';
 import { listItems as listPackingItemsSvc, createItem as createPackingItemSvc, updateItem as updatePackingItemSvc, deleteItem as deletePackingItemSvc, listBags, createBag as createBagSvc, updateBag as updateBagSvc, deleteBag as deleteBagSvc, setBagMembers } from '../../../services/packingService';
 import { isUpdateConflict } from '../../../services/conflictResult';
 import { getWeather } from '../../../services/weatherService';
 import { listCategories } from '../../../services/categoryService';
-import { listTags, createTag, updateTag, deleteTag, getTagByIdAndUser } from '../../../services/tagService';
+import { listTags, createTag, updateTag, deleteTag, getTagByIdAndUser } from '../../tags/tags.bridge';
 import { listItems as listTodosSvc, createItem as createTodoSvc, updateItem as updateTodoSvc, deleteItem as deleteTodoSvc } from '../../../services/todoService';
 import { listFiles, createFile, createFileLink, getFileById, updateFile, softDeleteFile, findForeignLinkTarget, resolveFilePath, BLOCKED_EXTENSIONS, filesDir } from '../../../services/fileService';
 import { createNote as createCollabNoteSvc, createPoll as createCollabPollSvc, votePoll as voteCollabPollSvc, createMessage as createCollabMessageSvc, listNotes as listCollabNotesSvc, listPolls as listCollabPollsSvc, listMessages as listCollabMessagesSvc } from '../../../services/collabService';
@@ -55,9 +57,11 @@ function canEditTripAs(action: string, tripId: number, userId: number): boolean 
 }
 
 // Reused for costs.create so a plugin write frozen-FX and members/payers logic
-// matches a normal web-app budget write exactly (it has no injected deps).
-const budgetSvc = new BudgetService();
-const reservationsSvc = new ReservationsService();
+// matches a normal web-app budget write exactly. This factory file runs outside
+// the Nest container, so the shared connection is handed over manually.
+const dbs = new DatabaseService(db);
+const budgetSvc = new BudgetService(dbs);
+const reservationsSvc = new ReservationsService(dbs);
 // The booking notification the REST controller sends after a create/update/delete
 // is fire-and-forget, so it never blocks the plugin write.
 function notifyBooking(actingUserId: number, tripId: number, booking: string, type: string): void {
@@ -279,7 +283,7 @@ export function createRealRpcHost(id: string, granted: ReadonlySet<string>, rout
       // bytes to the shared demo instance, even through a plugin's db:write:files.
       // Only resolve the email when demo mode is actually on — keeps the hot path
       // (and the schema surface) untouched for self-hosted installs.
-      if (process.env.DEMO_MODE?.toLowerCase() === 'true') {
+      if (readEnv().demo.enabled) {
         const uploader = db.prepare('SELECT email FROM users WHERE id = ?').get(actingUserId) as { email?: string } | undefined;
         if (isDemoEmail(uploader?.email)) throw new ForbiddenResource('Uploads are disabled in demo mode.');
       }
@@ -423,7 +427,7 @@ export function createRealRpcHost(id: string, granted: ReadonlySet<string>, rout
     // The acting user's own decrypted value for one of this plugin's user-scope settings.
     getUserSetting: (pluginId, userId, key) => readUserSettingDecrypted(pluginId, userId, key),
     // A short-lived OAuth access token for the acting user (host-brokered; refreshes).
-    getOAuthToken: (pluginId, userId) => new PluginOAuthService().getAccessToken(pluginId, userId, Date.now()),
+    getOAuthToken: (pluginId, userId) => new PluginOAuthService(dbs).getAccessToken(pluginId, userId, Date.now()),
     // Persistent scheduler (jobs:run). Caps bound the abuse surface: a plugin can't
     // hoard timers, name-bomb, ship a huge payload, or busy-loop a recurring task.
     schedulerSet: (name, dueAt, everyMs, payload) => {
@@ -695,7 +699,7 @@ export function createRealRpcHost(id: string, granted: ReadonlySet<string>, rout
     },
     // --- Vacay write: the plan is the ACTING USER's active plan (resolved host-side);
     // the service broadcasts to plan users itself. ---
-    vacayToggleEntry: (userId, date) => { requireAddon(ADDON_IDS.VACAY, 'vacay'); return vacayToggleEntrySvc(userId, getActivePlanId(userId), date, undefined); },
+    vacayToggleEntry: (userId, date) => { requireAddon(ADDON_IDS.VACAY, 'vacay'); return vacayToggleEntrySvc(userId, getActivePlanId(userId), date, 1, 'vacation', undefined); },
     vacayToggleCompanyHoliday: (userId, date, note) => {
       requireAddon(ADDON_IDS.VACAY, 'vacay');
       return vacayToggleCompanyHolidaySvc(getActivePlanId(userId), date, note, undefined);

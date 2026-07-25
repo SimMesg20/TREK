@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { broadcast } from '../../websocket';
-import { canAccessTrip } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
 import * as dayService from '../../services/dayService';
@@ -15,9 +15,11 @@ type Trip = { user_id: number };
  */
 @Injectable()
 export class AccommodationsService {
+  constructor(private readonly dbs: DatabaseService) {}
+
   /** Mirrors the requireTripAccess middleware (owner or member), returning the trip. */
   verifyTripAccess(tripId: string, userId: number) {
-    return canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
+    return this.dbs.canAccessTrip(Number(tripId), userId) as Trip | null | undefined;
   }
 
   canEdit(trip: Trip, user: User): boolean {

@@ -8,7 +8,7 @@ import { createBudgetItem, freezeForeignRate } from '../../services/budgetServic
 import { isAddonEnabled } from '../../services/adminService';
 import { ADDON_IDS } from '../../addons';
 import { searchNominatim } from '../../services/mapsService';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import type { User } from '../../types';
 import { KitineraryExtractorService } from './kitinerary-extractor.service';
 import { LlmParseService } from '../llm-parse/llm-parse.service';
@@ -17,24 +17,29 @@ import { typeToCostCategory } from '@trek/shared';
 import type { BookingImportPreviewItem, BookingImportPreviewResponse, BookingImportConfirmResponse, BookingImportMode, BookingImportFileReport, Reservation } from '@trek/shared';
 import type { ParsedBookingItem, KiReservation } from './kitinerary.types';
 
-function resolveDayId(tripId: string, iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const date = iso.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const exact = db.prepare('SELECT id FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(tripId, date) as { id: number } | undefined;
-  if (exact) return exact.id;
-  // Clamp to the nearest trip day so an out-of-range / unmatched check-in still
-  // resolves and the accommodation row is inserted.
-  const nearest = db.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY ABS(JULIANDAY(date) - JULIANDAY(?)) ASC, date ASC LIMIT 1').get(tripId, date) as { id: number } | undefined;
-  return nearest?.id ?? null;
-}
-
 @Injectable()
 export class BookingImportService {
   constructor(
     private readonly extractor: KitineraryExtractorService,
     private readonly llmParse: LlmParseService,
+    private readonly dbs: DatabaseService,
   ) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
+  private resolveDayId(tripId: string, iso: string | null | undefined): number | null {
+    if (!iso) return null;
+    const date = iso.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const exact = this.db.prepare('SELECT id FROM days WHERE trip_id = ? AND date = ? LIMIT 1').get(tripId, date) as { id: number } | undefined;
+    if (exact) return exact.id;
+    // Clamp to the nearest trip day so an out-of-range / unmatched check-in still
+    // resolves and the accommodation row is inserted.
+    const nearest = this.db.prepare('SELECT id FROM days WHERE trip_id = ? ORDER BY ABS(JULIANDAY(date) - JULIANDAY(?)) ASC, date ASC LIMIT 1').get(tripId, date) as { id: number } | undefined;
+    return nearest?.id ?? null;
+  }
 
   isAvailable(): boolean {
     return this.extractor.isAvailable();
@@ -202,8 +207,8 @@ export class BookingImportService {
         // the accommodation row is actually inserted (createReservation gates on them).
         let createAccommodation: { place_id?: number; start_day_id?: number; end_day_id?: number; check_in?: string; check_out?: string; confirmation?: string } | undefined;
         if (item.type === 'hotel' && _accommodation) {
-          const startDayId = resolveDayId(tripId, _accommodation.check_in);
-          const endDayId   = resolveDayId(tripId, _accommodation.check_out);
+          const startDayId = this.resolveDayId(tripId, _accommodation.check_in);
+          const endDayId   = this.resolveDayId(tripId, _accommodation.check_out);
           createAccommodation = {
             place_id: placeId,
             start_day_id: startDayId ?? undefined,

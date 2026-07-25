@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
@@ -19,6 +20,7 @@ import type { Request } from 'express';
 import { diskStorage } from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { readEnv } from '../../app-config';
 import { v4 as uuidv4 } from 'uuid';
 import type { User } from '../../types';
 import { CollectionsService } from './collections.service';
@@ -26,6 +28,8 @@ import { CollectionsAddonGuard } from './collections-addon.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { PLACE_IMAGE_UPLOAD } from '../common/place-image-upload';
+import { placeImageUrl } from '../../services/placeImage';
 import { isDemoEmail } from '../../services/demo';
 import {
   collectionCreateRequestSchema,
@@ -35,6 +39,7 @@ import {
   collectionSaveFromTripManyRequestSchema,
   collectionPlaceUpdateRequestSchema,
   collectionSetStatusRequestSchema,
+  placeRatingRequestSchema,
   collectionCopyToTripRequestSchema,
   collectionInviteRequestSchema,
   collectionInviteActionRequestSchema,
@@ -54,6 +59,7 @@ import {
   type CollectionSaveFromTripManyRequest,
   type CollectionPlaceUpdateRequest,
   type CollectionSetStatusRequest,
+  type PlaceRatingRequest,
   type CollectionCopyToTripRequest,
   type CollectionInviteRequest,
   type CollectionInviteActionRequest,
@@ -164,6 +170,37 @@ export class CollectionsController {
     @Headers('x-socket-id') socketId?: string,
   ) {
     return this.collections.setStatus(user.id, Number(pid), body.status, socketId);
+  }
+
+  @Put('places/:pid/rating')
+  setRating(
+    @CurrentUser() user: User,
+    @Param('pid') pid: string,
+    @Body(new ZodValidationPipe(placeRatingRequestSchema)) body: PlaceRatingRequest,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    return this.collections.setRating(user.id, Number(pid), body.rating, socketId);
+  }
+
+  @Delete('places/:pid/rating')
+  clearRating(@CurrentUser() user: User, @Param('pid') pid: string, @Headers('x-socket-id') socketId?: string) {
+    return this.collections.setRating(user.id, Number(pid), null, socketId);
+  }
+
+  @Post('places/:pid/image')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('image', PLACE_IMAGE_UPLOAD))
+  uploadPlaceImage(
+    @CurrentUser() user: User,
+    @Param('pid') pid: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Headers('x-socket-id') socketId?: string,
+  ) {
+    if (readEnv().demo.enabled && isDemoEmail(user.email)) {
+      throw new HttpException({ error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' }, 403);
+    }
+    if (!file) throw new HttpException({ error: 'No image uploaded' }, 400);
+    return this.collections.setPlaceImage(user.id, Number(pid), placeImageUrl(file.filename), socketId);
   }
 
   @Delete('places/:pid')
@@ -330,7 +367,7 @@ export class CollectionsController {
   @Post(':id/cover')
   @UseInterceptors(FileInterceptor('cover', COVER_UPLOAD))
   uploadCover(@CurrentUser() user: User, @Param('id') id: string, @UploadedFile() file: Express.Multer.File | undefined, @Headers('x-socket-id') socketId?: string) {
-    if (process.env.DEMO_MODE?.toLowerCase() === 'true' && isDemoEmail(user.email)) {
+    if (readEnv().demo.enabled && isDemoEmail(user.email)) {
       throw new HttpException({ error: 'Uploads are disabled in demo mode. Self-host TREK for full functionality.' }, 403);
     }
     if (!file) throw new HttpException({ error: 'No image uploaded' }, 400);

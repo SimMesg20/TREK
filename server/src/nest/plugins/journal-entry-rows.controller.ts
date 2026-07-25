@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { canAccessJourney } from '../../services/journeyService';
 import { isAddonEnabled } from '../../services/adminService';
 import { ADDON_IDS } from '../../addons';
@@ -66,7 +66,10 @@ function normalize(raw: unknown): EntryRow[] {
 @Controller('api/journal-entry-rows')
 @UseGuards(JwtAuthGuard)
 export class JournalEntryRowsController {
-  constructor(private readonly runtime: PluginRuntimeService) {}
+  constructor(
+    private readonly runtime: PluginRuntimeService,
+    private readonly dbs: DatabaseService,
+  ) {}
 
   @Get(':entryId')
   async get(
@@ -79,7 +82,7 @@ export class JournalEntryRowsController {
     if (!Number.isFinite(entryId) || userId == null) return { providers: [] };
 
     // The entry's journey must be one the caller can access — same gate as a read.
-    const row = db.prepare('SELECT journey_id FROM journey_entries WHERE id = ?').get(entryId) as { journey_id: number } | undefined;
+    const row = this.dbs.connection.prepare('SELECT journey_id FROM journey_entries WHERE id = ?').get(entryId) as { journey_id: number } | undefined;
     if (!row || !canAccessJourney(row.journey_id, userId)) return { providers: [] };
 
     const ids = this.runtime.providersOf('journalEntryProvider');

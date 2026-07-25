@@ -80,6 +80,7 @@ const settings: TranslationStrings = {
   'settings.notifyTripReminder': 'Seyahat hatırlatıcıları',
   'settings.notifyTodoDue': 'Yapılacak vadesi yakında',
   'settings.notifyVacayInvite': 'Vacay birleştirme davetleri',
+  'settings.notifyVacayShare': 'Vacay takvim paylaşımları',
   'settings.notifyPhotosShared': 'Paylaşılan fotoğraflar (Immich)',
   'settings.notifyCollabMessage': 'Sohbet mesajları (Collab)',
   'settings.notifyPackingTagged': 'Paket listesi: atamalar',
@@ -296,8 +297,8 @@ const settings: TranslationStrings = {
   'settings.oauth.modal.machineClientUsage':
     'Bir jeton alın: grant_type=client_credentials, client_id ve client_secret ile POST /oauth/token. Tarayıcı yok, yenileme belirteci yok.',
   'settings.oauth.badge.machine': 'makine',
-  'settings.currency': 'Currency',
-  'settings.currencyHint': 'All amounts in Costs are converted to and shown in this currency.',
+  'settings.currency': 'Görüntüleme para birimi',
+  'settings.currencyHint': 'Maliyetler bölümündeki tutarlar yalnızca görüntüleme amacıyla bu para birimine çevrilerek gösterilir — orijinal tutarlar değişmez.',
   'settings.currencyTrip': 'Gezi para birimi',
   'settings.passkey.title': 'Passkey’ler',
   'settings.passkey.description':
@@ -425,6 +426,20 @@ const settings: TranslationStrings = {
   'settings.appearance.example.normal': 'Place names, descriptions',
   'settings.appearance.example.small': 'Addresses, labels',
   'settings.appearance.experimental': 'Experimental',
+  'settings.appearance.mobileNav': 'Alt gezinme çubuğu',
+  'settings.appearance.mobileNav.hint':
+    'Hangi öğelerin çubukta görüneceğini, hangilerinin “Diğer” altında yer alacağını seçin. Dashboard her zaman ilk sırada kalır.',
+  'settings.appearance.mobileNav.inBar': 'Çubukta',
+  'settings.appearance.mobileNav.underMore': '“Diğer” altında',
+  'settings.appearance.mobileNav.moreEmpty': 'Burada henüz bir şey yok — her şey çubuğa sığıyor.',
+  'settings.appearance.mobileNav.pinned': 'Sabit',
+  'settings.appearance.mobileNav.toMore': '“Diğer” altına taşı',
+  'settings.appearance.mobileNav.toBar': 'Çubuğa taşı',
+  'settings.appearance.dashOrder': 'Panel sıralaması',
+  'settings.appearance.dashOrder.hint':
+    'Gezi listesi ve widget’ların telefon panelinizde nasıl sıralanacağını yeniden düzenleyin. Öne çıkan gezi her zaman en üstte kalır.',
+  'settings.appearance.dashOrder.trips': 'Geziler',
+  'settings.appearance.dashOrder.hidden': 'Gizli',
   'settings.general.languageRegion': 'Language & region',
   'settings.general.travelMap': 'Travel & map',
 
@@ -491,7 +506,8 @@ const settings: TranslationStrings = {
   'settings.pluginActivity.columns.when': 'Ne zaman',
   'settings.pluginActivity.columns.status': 'Sonuç',
   'settings.alwaysShowRoutes': 'Rezervasyon rotalarını her zaman göster',
-  'settings.alwaysShowRoutesHint': 'Haritada her uçuş, tren ve diğer rezervasyonun rotasını, tek tek açmaya gerek kalmadan otomatik olarak gösterir.',
+  'settings.alwaysShowRoutesHint':
+    'Haritada her uçuş, tren ve diğer rezervasyonun rotasını, tek tek açmaya gerek kalmadan otomatik olarak gösterir.',
 };
 
 export default settings;

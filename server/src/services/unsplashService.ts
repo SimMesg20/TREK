@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { readEnv } from '../app-config';
 import { safeFetch } from '../utils/ssrfGuard';
 import { db } from '../db/database';
 import { decrypt_api_key } from './apiKeyCrypto';
@@ -35,7 +36,7 @@ export interface UnsplashPhoto {
  * in which case the search falls back to the unauthenticated endpoint.
  */
 export function getUnsplashKey(userId: number): string | null {
-  const env_key = process.env.UNSPLASH_ACCESS_KEY?.trim();
+  const env_key = readEnv().integrations.unsplashAccessKey;
   if (env_key) return env_key;
   const user = db.prepare('SELECT unsplash_api_key FROM users WHERE id = ?').get(userId) as { unsplash_api_key: string | null } | undefined;
   const user_key = decrypt_api_key(user?.unsplash_api_key);

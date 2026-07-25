@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { Server } from 'http';
+import { DatabaseModule } from '../../src/nest/database/database.module';
 import { Test } from '@nestjs/testing';
 import { seedUser, sessionCookie } from './harness';
 
@@ -43,7 +44,7 @@ describe('Share-link e2e (real auth guard + temp SQLite)', () => {
   let app: Awaited<ReturnType<typeof build>>;
 
   async function build() {
-    const moduleRef = await Test.createTestingModule({ imports: [ShareModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, ShareModule] }).compile();
     const nest = moduleRef.createNestApplication();
     nest.use(cookieParser());
     nest.useGlobalFilters(new TrekExceptionFilter());

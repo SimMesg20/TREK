@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { Server } from 'http';
+import { DatabaseModule } from '../../src/nest/database/database.module';
 import { Test } from '@nestjs/testing';
 import { seedUser, sessionCookie } from './harness';
 
@@ -55,7 +56,7 @@ describe('Calendar-feed e2e (real auth guard + temp SQLite)', () => {
   let prevAppUrl: string | undefined;
 
   async function build() {
-    const moduleRef = await Test.createTestingModule({ imports: [FeedsModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, FeedsModule] }).compile();
     const nest = moduleRef.createNestApplication();
     nest.use(cookieParser());
     nest.useGlobalFilters(new TrekExceptionFilter());

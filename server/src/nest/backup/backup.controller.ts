@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import fs from 'fs';
+import { readEnv } from '../../app-config';
 import type { User } from '../../types';
 import { BackupService } from './backup.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -148,7 +149,7 @@ export class BackupController {
     } catch (err) {
       console.error('[backup] PUT auto-settings:', err);
       const msg = err instanceof Error ? err.message : String(err);
-      throw new HttpException({ error: 'Could not save auto-backup settings', detail: process.env.NODE_ENV?.toLowerCase() !== 'production' ? msg : undefined }, 500);
+      throw new HttpException({ error: 'Could not save auto-backup settings', detail: !readEnv().app.isProduction ? msg : undefined }, 500);
     }
   }
 

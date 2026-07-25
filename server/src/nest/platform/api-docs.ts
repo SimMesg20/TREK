@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { readEnv } from '../../app-config';
 import { attachZodBodySchemas } from '../common/api-zod';
 
 /**
@@ -16,7 +17,7 @@ import { attachZodBodySchemas } from '../common/api-zod';
  * accepts `Authorization: Bearer` everywhere as the cookie fallback.
  */
 export function setupApiDocs(app: INestApplication): void {
-  const version: string = process.env.APP_VERSION || (require('../../../package.json') as { version: string }).version;
+  const version: string = readEnv().app.appVersion || (require('../../../package.json') as { version: string }).version;
   const config = new DocumentBuilder()
     .setTitle('TREK API')
     .setDescription(

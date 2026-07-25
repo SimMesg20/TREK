@@ -6,6 +6,8 @@ const { dbMock } = vi.hoisted(() => {
 });
 const { canAccessTrip } = vi.hoisted(() => ({ canAccessTrip: vi.fn(() => ({ user_id: 1 })) }));
 vi.mock('../../../src/db/database', () => ({ db: dbMock, canAccessTrip, closeDb: () => {}, reinitialize: () => {} }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 
 const { broadcast } = vi.hoisted(() => ({ broadcast: vi.fn() }));
 vi.mock('../../../src/websocket', () => ({ broadcast }));
@@ -37,7 +39,7 @@ vi.mock('../../../src/services/fileService', () => ({ listFiles: () => [] }));
 import { TripsService } from '../../../src/nest/trips/trips.service';
 import { rebaseTripCurrency } from '../../../src/services/budgetService';
 
-function svc() { return new TripsService(); }
+function svc() { return new TripsService(new DatabaseService(dbConn)); }
 beforeEach(() => vi.clearAllMocks());
 
 describe('TripsService (wrapper delegation + bundle/copy/notify helpers)', () => {

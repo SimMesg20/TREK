@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { AppConfigModule } from './app-config/app-config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health/health.controller';
 import { HealthService } from './health/health.service';
@@ -52,7 +53,7 @@ import { IdempotencyInterceptor } from './common/idempotency.interceptor';
  * migrated.
  */
 @Module({
-  imports: [DatabaseModule, WeatherModule, HelpModule, AirportsModule, ConfigModule, SystemNoticesModule, MapsModule, CategoriesModule, TagsModule, NotificationsModule, AtlasModule, VacayModule, PackingModule, TodoModule, BudgetModule, ReservationsModule, DaysModule, AssignmentsModule, PlacesModule, TripsModule, CollabModule, FilesModule, PhotosModule, MemoriesModule, AirtrailModule, JourneyModule, CollectionsModule, ShareModule, TripInviteModule, TransitModule, FeedsModule, SettingsModule, BackupModule, AuthModule, OidcModule, OauthModule, AdminModule, AddonsModule, PluginsModule, BookingImportModule],
+  imports: [AppConfigModule, DatabaseModule, WeatherModule, HelpModule, AirportsModule, ConfigModule, SystemNoticesModule, MapsModule, CategoriesModule, TagsModule, NotificationsModule, AtlasModule, VacayModule, PackingModule, TodoModule, BudgetModule, ReservationsModule, DaysModule, AssignmentsModule, PlacesModule, TripsModule, CollabModule, FilesModule, PhotosModule, MemoriesModule, AirtrailModule, JourneyModule, CollectionsModule, ShareModule, TripInviteModule, TransitModule, FeedsModule, SettingsModule, BackupModule, AuthModule, OidcModule, OauthModule, AdminModule, AddonsModule, PluginsModule, BookingImportModule],
   controllers: [HealthController],
   providers: [
     HealthService,

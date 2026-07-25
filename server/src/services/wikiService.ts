@@ -1,5 +1,6 @@
 import { existsSync, promises as fs } from 'fs';
 import path from 'path';
+import { readEnv } from '../app-config';
 
 /**
  * In-app Help/Wiki content, sourced from the `wiki/**` directory that ships with
@@ -24,7 +25,7 @@ const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * the Dockerfile copies `wiki/` to /app/wiki). `process.cwd()` would not — Docker
  * runs the server from /app/server.
  */
-const WIKI_DIR = process.env.TREK_WIKI_DIR ?? path.join(__dirname, '..', '..', '..', 'wiki');
+const WIKI_DIR = readEnv().paths.wikiDir ?? path.join(__dirname, '..', '..', '..', 'wiki');
 
 /**
  * Probe for the sidebar rather than the bare directory: an empty or half-copied

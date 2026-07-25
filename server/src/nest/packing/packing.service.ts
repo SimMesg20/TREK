@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../db/database';
+import { DatabaseService } from '../database/database.service';
 import { broadcast } from '../../websocket';
 import { checkPermission } from '../../services/permissions';
 import type { User } from '../../types';
@@ -17,6 +17,12 @@ type Trip = NonNullable<ReturnType<typeof svc.verifyTripAccess>>;
  */
 @Injectable()
 export class PackingService {
+  constructor(private readonly dbs: DatabaseService) {}
+
+  private get db() {
+    return this.dbs.connection;
+  }
+
   verifyTripAccess(tripId: string, userId: number) {
     return svc.verifyTripAccess(tripId, userId);
   }
@@ -63,7 +69,7 @@ export class PackingService {
   /** Reads an item's current privacy fields (#858) before an update, so the
    *  controller can detect a public↔private transition and route the broadcast. */
   getItemPrivacy(tripId: string, id: string): PrivacyFields | undefined {
-    return db.prepare('SELECT is_private, owner_id FROM packing_items WHERE id = ? AND trip_id = ?').get(id, tripId) as PrivacyFields | undefined;
+    return this.db.prepare('SELECT is_private, owner_id FROM packing_items WHERE id = ? AND trip_id = ?').get(id, tripId) as PrivacyFields | undefined;
   }
 
   createItem(tripId: string, data: Parameters<typeof svc.createItem>[1], ownerId?: number) {
@@ -146,7 +152,7 @@ export class PackingService {
   notifyTagged(tripId: string, actor: User, category: string, userIds: unknown): void {
     if (!Array.isArray(userIds) || userIds.length === 0) return;
     import('../../services/notificationService').then(({ send }) => {
-      const tripInfo = db.prepare('SELECT title FROM trips WHERE id = ?').get(tripId) as { title: string } | undefined;
+      const tripInfo = this.db.prepare('SELECT title FROM trips WHERE id = ?').get(tripId) as { title: string } | undefined;
       send({
         event: 'packing_tagged',
         actorId: actor.id,

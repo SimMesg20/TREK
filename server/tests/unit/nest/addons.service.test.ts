@@ -7,6 +7,8 @@ const { dbMock } = vi.hoisted(() => {
   return { dbMock: { prepare: vi.fn(() => stmt), _stmt: stmt } };
 });
 vi.mock('../../../src/db/database', () => ({ db: dbMock, closeDb: () => {}, reinitialize: () => {} }));
+import { db as dbConn } from '../../../src/db/database';
+import { DatabaseService } from '../../../src/nest/database/database.service';
 
 const { getBagTracking, getCollabFeatures } = vi.hoisted(() => ({
   getBagTracking: vi.fn(() => ({ enabled: false })),
@@ -20,7 +22,7 @@ vi.mock('../../../src/services/memories/helpersService', () => ({ getPhotoProvid
 import { AddonsService } from '../../../src/nest/addons/addons.service';
 
 function svc() {
-  return new AddonsService();
+  return new AddonsService(new DatabaseService(dbConn));
 }
 
 // Feed the three reads in order: addons, providers, fields.

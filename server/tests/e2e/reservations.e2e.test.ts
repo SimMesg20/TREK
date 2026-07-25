@@ -7,6 +7,7 @@
 import { TrekExceptionFilter } from '../../src/nest/common/trek-exception.filter';
 import { ReservationsModule } from '../../src/nest/reservations/reservations.module';
 import { seedUser, sessionCookie } from './harness';
+import { DatabaseModule } from '../../src/nest/database/database.module';
 import { Test } from '@nestjs/testing';
 
 import cookieParser from 'cookie-parser';
@@ -76,7 +77,7 @@ describe('Reservations + accommodations e2e (real auth guard + temp SQLite)', ()
   let app: Awaited<ReturnType<typeof build>>;
 
   async function build() {
-    const moduleRef = await Test.createTestingModule({ imports: [ReservationsModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, ReservationsModule] }).compile();
     const nest = moduleRef.createNestApplication();
     nest.use(cookieParser());
     nest.useGlobalFilters(new TrekExceptionFilter());

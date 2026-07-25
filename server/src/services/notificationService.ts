@@ -1,3 +1,4 @@
+import { readEnv } from '../app-config';
 import { db } from '../db/database';
 import { logDebug, logError } from './auditLog';
 import {
@@ -92,6 +93,13 @@ const EVENT_NOTIFICATION_CONFIG: Record<string, EventNotifConfig> = {
     textKey: 'notif.vacay_invite.text',
     navigateTextKey: 'notif.action.view_vacay',
     navigateTarget: p => (p.planId ? `/vacay/${p.planId}` : null),
+  },
+  vacay_share: {
+    inAppType: 'navigate',
+    titleKey: 'notif.vacay_share.title',
+    textKey: 'notif.vacay_share.text',
+    navigateTextKey: 'notif.action.view_vacay',
+    navigateTarget: () => '/vacay',
   },
   collection_invite: {
     inAppType: 'navigate',
@@ -208,7 +216,7 @@ export async function send(payload: NotificationPayload): Promise<void> {
   const configEntry = EVENT_NOTIFICATION_CONFIG[event];
   if (!configEntry) {
     logDebug(`notificationService.send: unknown event type "${event}", using fallback`);
-    if (process.env.NODE_ENV?.toLowerCase() === 'development' && actorId != null) {
+    if (readEnv().app.isDevelopment && actorId != null) {
       const devSender = (db.prepare('SELECT username, avatar FROM users WHERE id = ?').get(actorId) as { username: string; avatar: string | null } | undefined) ?? null;
       createNotificationForRecipient({
         type: 'simple',
