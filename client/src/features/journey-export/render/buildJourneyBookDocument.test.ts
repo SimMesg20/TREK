@@ -100,4 +100,80 @@ describe('buildJourneyBookDocument', () => {
     expect(result.html).toContain('Erstellt mit TREK')
     expect(result.html).not.toContain('fonts.googleapis.com')
   })
+
+  it('lays multiple photos out in justified rows (no fixed-crop grid)', () => {
+    const journey = buildJourney()
+    journey.entries[0].photos = [
+      { id: 100, entry_id: 10, photo_id: 1, shared: 0, sort_order: 0, created_at: 1, width: 1600, height: 900 },
+      { id: 101, entry_id: 10, photo_id: 2, shared: 0, sort_order: 1, created_at: 1, width: 900, height: 1600 },
+      { id: 102, entry_id: 10, photo_id: 3, shared: 0, sort_order: 2, created_at: 1, width: 1200, height: 1200 },
+    ] as JourneyDetail['entries'][number]['photos']
+
+    const html = buildJourneyBookDocument(journey).html
+
+    expect(html).toContain('class="pg-row"')
+    expect(html).toContain('pg-cell')
+    // Aspect-ratio-driven flex-grow keeps every photo uncropped.
+    expect(html).toContain('flex-grow:')
+  })
+
+  it('shows a single photo whole (contained, never cropped)', () => {
+    const html = buildJourneyBookDocument(buildJourney()).html
+    expect(html).toContain('pg-single')
+  })
+
+  it('renders mood and weather chips with emoji + readable labels', () => {
+    const journey = buildJourney()
+    journey.entries[0].mood = 'amazing'
+    journey.entries[0].weather = 'sunny'
+
+    const html = buildJourneyBookDocument(journey).html
+
+    expect(html).toContain('entry-chips')
+    expect(html).toContain('Amazing')
+    expect(html).toContain('Sunny')
+  })
+
+  it('renders pros/cons verdict cards when present', () => {
+    const journey = buildJourney()
+    journey.entries[0].pros_cons = { pros: ['Amazing views'], cons: ['Crowded'] }
+
+    const html = buildJourneyBookDocument(journey).html
+
+    expect(html).toContain('verdict-wrap')
+    expect(html).toContain('Amazing views')
+    expect(html).toContain('Crowded')
+  })
+
+  it('gives photo-less entries a text-focus layout', () => {
+    const journey = buildJourney()
+    journey.entries[0].photos = []
+
+    const html = buildJourneyBookDocument(journey).html
+
+    expect(html).toContain('entry-page--text-focus')
+  })
+
+  it('scales the cover title down for long titles so it fits the cover', () => {
+    const short = buildJourneyBookDocument(buildJourney({ title: 'Iceland' })).html
+    const long = buildJourneyBookDocument(
+      buildJourney({ title: 'A Very Long Journey Across the Whole of Northern Europe' }),
+    ).html
+
+    expect(short).toContain('font-size:56pt')
+    expect(long).toContain('font-size:24pt')
+  })
+
+  it('defaults to continuous mode and exposes toggle body-class hooks', () => {
+    const html = buildJourneyBookDocument(buildJourney()).html
+
+    expect(html).toContain('<body class="continuous">')
+    // Body-class hooks the preview toggles flip live.
+    expect(html).toContain('body.hide-cover-title')
+    expect(html).toContain('body.hide-cover-stats')
+    expect(html).toContain('body.hide-cover-branding')
+    expect(html).toContain('body.light-cover-dim')
+    expect(html).toContain('body.hide-proscons')
+    expect(html).toContain('body.hide-moodweather')
+  })
 })
