@@ -16,6 +16,18 @@ export async function downloadJourneyBookPDF(journey: JourneyDetail, options: Jo
     saveLabel: translate(t, 'journey.pdf.saveAsPdf', 'Save as PDF'),
     closeLabel: translate(t, 'common.close', 'Close'),
     pagesLabel: translate(t, 'journey.pdf.pages', 'pages'),
+    labels: {
+      options: translate(t, 'journey.export.options', 'Options'),
+      layout: translate(t, 'journey.export.layout', 'Layout'),
+      cover: translate(t, 'journey.export.cover', 'Cover'),
+      content: translate(t, 'journey.export.content', 'Content'),
+      continuous: translate(t, 'journey.export.continuous', 'Continuous page'),
+      coverInfo: translate(t, 'journey.export.coverInfo', 'Title & stats'),
+      branding: translate(t, 'journey.export.branding', 'Branding'),
+      dimCover: translate(t, 'journey.export.dimCover', 'Dim cover photo'),
+      prosCons: translate(t, 'journey.export.prosCons', 'Pros / cons'),
+      moodWeather: translate(t, 'journey.export.moodWeather', 'Mood & weather'),
+    },
   })
 }
 

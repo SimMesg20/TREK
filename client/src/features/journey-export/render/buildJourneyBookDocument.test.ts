@@ -113,8 +113,23 @@ describe('buildJourneyBookDocument', () => {
 
     expect(html).toContain('class="pg-row"')
     expect(html).toContain('pg-cell')
-    // Aspect-ratio-driven flex-grow keeps every photo uncropped.
-    expect(html).toContain('flex-grow:')
+    // Each cell's flex-basis equals the photo's own aspect ratio, so the cell
+    // box matches the image and object-fit:cover never has to crop.
+    expect(html).toContain('style="flex:')
+    expect(html).toContain(' 1 0"')
+  })
+
+  it('renders videos from a lightweight thumbnail poster with a play badge', () => {
+    const journey = buildJourney()
+    journey.entries[0].photos = [
+      { id: 200, entry_id: 10, photo_id: 7, shared: 0, sort_order: 0, created_at: 1, width: 1600, height: 900, media_type: 'video' },
+    ] as JourneyDetail['entries'][number]['photos']
+
+    const html = buildJourneyBookDocument(journey).html
+
+    expect(html).toContain('/api/photos/7/thumbnail')
+    expect(html).not.toContain('/api/photos/7/original')
+    expect(html).toContain('pg-play')
   })
 
   it('shows a single photo whole (contained, never cropped)', () => {
@@ -164,16 +179,35 @@ describe('buildJourneyBookDocument', () => {
     expect(long).toContain('font-size:24pt')
   })
 
-  it('defaults to continuous mode and exposes toggle body-class hooks', () => {
-    const html = buildJourneyBookDocument(buildJourney()).html
+  it('defaults to A4 paged mode and exposes toggle body-class hooks', () => {
+    const result = buildJourneyBookDocument(buildJourney())
 
-    expect(html).toContain('<body class="continuous">')
+    // Paged A4 is the reliable default; continuous is opt-in.
+    expect(result.settings.continuous).toBe(false)
+    expect(result.html).not.toContain('class="continuous"')
     // Body-class hooks the preview toggles flip live.
-    expect(html).toContain('body.hide-cover-title')
-    expect(html).toContain('body.hide-cover-stats')
-    expect(html).toContain('body.hide-cover-branding')
-    expect(html).toContain('body.light-cover-dim')
-    expect(html).toContain('body.hide-proscons')
-    expect(html).toContain('body.hide-moodweather')
+    expect(result.html).toContain('body.hide-cover-title')
+    expect(result.html).toContain('body.hide-cover-stats')
+    expect(result.html).toContain('body.hide-cover-branding')
+    expect(result.html).toContain('body.light-cover-dim')
+    expect(result.html).toContain('body.hide-proscons')
+    expect(result.html).toContain('body.hide-moodweather')
+  })
+
+  it('enables continuous mode only when requested via settings', () => {
+    const result = buildJourneyBookDocument(buildJourney(), { settings: { continuous: true } })
+
+    expect(result.settings.continuous).toBe(true)
+    expect(result.html).toContain('class="continuous"')
+  })
+
+  it('maps hide settings onto body classes the export config controls', () => {
+    const result = buildJourneyBookDocument(buildJourney(), {
+      settings: { showBranding: false, showProsCons: false, showMoodWeather: false },
+    })
+
+    expect(result.html).toContain('hide-cover-branding')
+    expect(result.html).toContain('hide-proscons')
+    expect(result.html).toContain('hide-moodweather')
   })
 })

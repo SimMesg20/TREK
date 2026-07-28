@@ -8,14 +8,48 @@ import { marked } from 'marked'
 import { sanitizeRichTextHtml } from '@trek/shared'
 import type { JourneyDetail, JourneyEntry, JourneyPhoto } from '../../../store/journeyStore'
 
+// Typed export configuration. This is the single source of truth for what the
+// book shows; the preview toggles and the upcoming Export Designer both drive
+// (and can persist) this object, and the renderer turns it into the initial
+// document state — options never have to reach in and mutate iframe CSS blind.
+export interface JourneyExportSettings {
+  /** One long content-sized page (screen scroll) vs. real A4 paged output. */
+  continuous: boolean
+  /** Cover title, subtitle and the Days / Entries / Photos stat tiles. */
+  showCoverInfo: boolean
+  /** "Journey Book" label + "Made with TREK" footer. */
+  showBranding: boolean
+  /** Dark cover overlay (keeps text readable) vs. a lighter overlay. */
+  dimCover: boolean
+  /** Pros / cons verdict cards. */
+  showProsCons: boolean
+  /** Mood / weather chips. */
+  showMoodWeather: boolean
+}
+
+// A4 paged is the default: it is print-ready and stable across print engines.
+// Continuous is an explicit opt-in for on-screen reading.
+export const DEFAULT_EXPORT_SETTINGS: JourneyExportSettings = {
+  continuous: false,
+  showCoverInfo: true,
+  showBranding: true,
+  dimCover: true,
+  showProsCons: true,
+  showMoodWeather: true,
+}
+
 export interface JourneyBookDocument {
   html: string
   estimatedPageCount: number
+  /** The resolved settings the document was built with. */
+  settings: JourneyExportSettings
 }
 
 export interface JourneyBookRenderOptions {
   locale?: string
   t?: (key: string) => string
+  /** Partial overrides merged over DEFAULT_EXPORT_SETTINGS. */
+  settings?: Partial<JourneyExportSettings>
 }
 
 interface JourneyBookLabels {
@@ -26,6 +60,21 @@ interface JourneyBookLabels {
   days: string
   entries: string
   photos: string
+  lovedIt: string
+  couldBeBetter: string
+}
+
+// Body classes the preview toggles flip live; the renderer sets the initial set
+// from the export settings so the first paint already matches the config.
+function bodyClassesFor(s: JourneyExportSettings): string {
+  const classes: string[] = []
+  if (s.continuous) classes.push('continuous')
+  if (!s.showCoverInfo) classes.push('hide-cover-title', 'hide-cover-stats')
+  if (!s.showBranding) classes.push('hide-cover-branding')
+  if (!s.dimCover) classes.push('light-cover-dim')
+  if (!s.showProsCons) classes.push('hide-proscons')
+  if (!s.showMoodWeather) classes.push('hide-moodweather')
+  return classes.join(' ')
 }
 
 function translate(t: JourneyBookRenderOptions['t'], key: string, fallback: string): string {
@@ -42,6 +91,8 @@ function labelsFor(options: JourneyBookRenderOptions): JourneyBookLabels {
     days: translate(options.t, 'journey.stats.days', 'Days'),
     entries: translate(options.t, 'journey.stats.entries', 'Entries'),
     photos: translate(options.t, 'journey.stats.photos', 'Photos'),
+    lovedIt: translate(options.t, 'journey.pdf.lovedIt', 'Loved it'),
+    couldBeBetter: translate(options.t, 'journey.pdf.couldBeBetter', 'Could be better'),
   }
 }
 
@@ -63,7 +114,15 @@ function abs(url: string | null | undefined): string {
   return window.location.origin + (url.startsWith('/') ? '' : '/') + url
 }
 
+function isVideo(p: JourneyPhoto): boolean {
+  return p.media_type === 'video'
+}
+
 function pSrc(p: JourneyPhoto): string {
+  // Videos can't be embedded in a print document, and their originals are huge,
+  // so use the lightweight poster/thumbnail. Images keep the full-resolution
+  // original so the print stays sharp.
+  if (isVideo(p)) return abs(`/api/photos/${p.photo_id}/thumbnail`)
   return abs(`/api/photos/${p.photo_id}/original`)
 }
 
@@ -82,7 +141,7 @@ function groupByDate(entries: JourneyEntry[]): Map<string, JourneyEntry[]> {
   return groups
 }
 
-function renderProscons(entry: JourneyEntry): string {
+function renderProscons(entry: JourneyEntry, labels: JourneyBookLabels): string {
   const pc = entry.pros_cons
   if (!pc) return ''
   const pros = pc.pros?.filter(p => p.trim()) || []
@@ -90,36 +149,27 @@ function renderProscons(entry: JourneyEntry): string {
   if (pros.length === 0 && cons.length === 0) return ''
 
   return `<div class="verdict-wrap"><div class="verdict-row">
-    ${pros.length > 0 ? `<div class="verdict-card pros"><div class="verdict-label">Loved it</div><ul>${pros.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
-    ${cons.length > 0 ? `<div class="verdict-card cons"><div class="verdict-label">Could be better</div><ul>${cons.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
+    ${pros.length > 0 ? `<div class="verdict-card pros"><div class="verdict-label">${esc(labels.lovedIt)}</div><ul>${pros.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+    ${cons.length > 0 ? `<div class="verdict-card cons"><div class="verdict-label">${esc(labels.couldBeBetter)}</div><ul>${cons.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
   </div></div>`
 }
 
-// Mood / weather chip metadata (emoji + label), mirroring the app's MoodChip /
-// WeatherChip so the book reads the same as the on-screen journal. Emoji are
-// used instead of the app's icon font so the PDF stays self-contained.
-const MOOD_META: Record<string, { emoji: string; label: string }> = {
-  amazing: { emoji: '😄', label: 'Amazing' },
-  good: { emoji: '🙂', label: 'Good' },
-  neutral: { emoji: '😐', label: 'Neutral' },
-  rough: { emoji: '🙁', label: 'Rough' },
-}
-const WEATHER_META: Record<string, { emoji: string; label: string }> = {
-  sunny: { emoji: '☀️', label: 'Sunny' },
-  partly: { emoji: '🌤️', label: 'Partly cloudy' },
-  cloudy: { emoji: '☁️', label: 'Cloudy' },
-  rainy: { emoji: '🌧️', label: 'Rainy' },
-  stormy: { emoji: '⛈️', label: 'Stormy' },
-  cold: { emoji: '❄️', label: 'Cold' },
-}
+// Mood / weather chip emoji, keyed by the same ids the app uses. The visible
+// label is resolved through the translation catalog (journey.mood.* /
+// journey.weather.*) so the book follows the reader's language; the emoji keeps
+// the PDF self-contained (no icon font needed).
+const MOOD_EMOJI: Record<string, string> = { amazing: '😄', good: '🙂', neutral: '😐', rough: '🙁' }
+const MOOD_FALLBACK: Record<string, string> = { amazing: 'Amazing', good: 'Good', neutral: 'Neutral', rough: 'Rough' }
+const WEATHER_EMOJI: Record<string, string> = { sunny: '☀️', partly: '🌤️', cloudy: '☁️', rainy: '🌧️', stormy: '⛈️', cold: '❄️' }
+const WEATHER_FALLBACK: Record<string, string> = { sunny: 'Sunny', partly: 'Partly cloudy', cloudy: 'Cloudy', rainy: 'Rainy', stormy: 'Stormy', cold: 'Cold' }
 
-function renderMoodWeather(entry: JourneyEntry): string {
-  const mood = entry.mood ? MOOD_META[entry.mood] : null
-  const weather = entry.weather ? WEATHER_META[entry.weather] : null
-  if (!mood && !weather) return ''
+function renderMoodWeather(entry: JourneyEntry, t: JourneyBookRenderOptions['t']): string {
+  const moodId = entry.mood && MOOD_EMOJI[entry.mood] ? entry.mood : null
+  const weatherId = entry.weather && WEATHER_EMOJI[entry.weather] ? entry.weather : null
+  if (!moodId && !weatherId) return ''
   const chips = [
-    mood ? `<span class="entry-chip entry-chip-mood">${mood.emoji} ${esc(mood.label)}</span>` : '',
-    weather ? `<span class="entry-chip entry-chip-weather">${weather.emoji} ${esc(weather.label)}</span>` : '',
+    moodId ? `<span class="entry-chip entry-chip-mood">${MOOD_EMOJI[moodId]} ${esc(translate(t, `journey.mood.${moodId}`, MOOD_FALLBACK[moodId]))}</span>` : '',
+    weatherId ? `<span class="entry-chip entry-chip-weather">${WEATHER_EMOJI[weatherId]} ${esc(translate(t, `journey.weather.${weatherId}`, WEATHER_FALLBACK[weatherId]))}</span>` : '',
   ].join('')
   return `<div class="entry-chips">${chips}</div>`
 }
@@ -146,21 +196,10 @@ function photoAR(p: JourneyPhoto): number {
   return 1.5
 }
 
-// Split photos into balanced rows of ~3, keeping row sizes within one of each
-// other so there's never a lonely trailing photo stretched across a full row.
-function balancedRows(photos: JourneyPhoto[], cols = 3): JourneyPhoto[][] {
-  const rowCount = Math.ceil(photos.length / cols)
-  const base = Math.floor(photos.length / rowCount)
-  let rem = photos.length % rowCount
-  const rows: JourneyPhoto[][] = []
-  let i = 0
-  for (let r = 0; r < rowCount; r++) {
-    const size = base + (rem > 0 ? 1 : 0)
-    if (rem > 0) rem--
-    rows.push(photos.slice(i, i + size))
-    i += size
-  }
-  return rows
+// A small play badge overlaid on video posters so a still frame still reads as
+// a video in the printed book.
+function videoBadge(p: JourneyPhoto): string {
+  return isVideo(p) ? '<span class="pg-play" aria-hidden="true"></span>' : ''
 }
 
 function renderPhotoBlock(photos: JourneyPhoto[]): string {
@@ -169,27 +208,45 @@ function renderPhotoBlock(photos: JourneyPhoto[]): string {
   if (photos.length === 1) {
     // A single hero photo is shown whole (never cropped), sized to its own
     // aspect ratio and centred.
-    return `<div class="entry-photos"><figure class="pg-single"><img src="${pSrc(photos[0])}" /></figure></div>`
+    const p = photos[0]
+    return `<div class="entry-photos"><figure class="pg-single">${videoBadge(p)}<img src="${pSrc(p)}" /></figure></div>`
   }
 
-  // Justified rows (Flickr / Google-Photos style): each photo keeps its own
-  // aspect ratio, widths within a row scale to fill the page width, and every
-  // photo in a row shares one height. Nothing is cropped and there are no grey
-  // mattes, while many-photo entries stay a comfortable size instead of
-  // shrinking into a tiny uniform grid.
+  // Geometry-safe justified rows: pick how many photos share a row so the row's
+  // natural full-width height lands near a target, then fill the width by
+  // aspect ratio. Each cell's box then has exactly its photo's aspect ratio, so
+  // object-fit: cover fills it WITHOUT cropping — and a stretched row's height
+  // is never clamped (clamping the height while cells still fill the width was
+  // what reintroduced cropping for panorama/portrait mixes). The final leftover
+  // row that can't reach the target height is shown at the target height with
+  // natural (aspect-correct) widths, left-aligned, so it stays crop-free too.
   const CONTENT_W = 745 // A4 landscape width (841.89pt) minus 48pt padding each side
   const GAP = 6
-  const MAX_H = 300
-  const MIN_H = 150
+  const TARGET_H = 235
 
-  const rowsHtml = balancedRows(photos).map(row => {
+  const rows: { photos: JourneyPhoto[]; filled: boolean }[] = []
+  let cur: JourneyPhoto[] = []
+  for (const p of photos) {
+    cur.push(p)
+    const arSum = cur.reduce((s, x) => s + photoAR(x), 0)
+    const h = (CONTENT_W - GAP * (cur.length - 1)) / arSum
+    if (h <= TARGET_H) { rows.push({ photos: cur, filled: true }); cur = [] }
+  }
+  if (cur.length) rows.push({ photos: cur, filled: false })
+
+  const rowsHtml = rows.map(({ photos: row, filled }) => {
     const arSum = row.reduce((s, p) => s + photoAR(p), 0)
-    let h = (CONTENT_W - GAP * (row.length - 1)) / arSum
-    h = Math.min(MAX_H, Math.max(MIN_H, h))
+    if (filled) {
+      const h = (CONTENT_W - GAP * (row.length - 1)) / arSum
+      const cells = row.map(p =>
+        `<div class="pg-cell" style="flex:${photoAR(p).toFixed(4)} 1 0">${videoBadge(p)}<img src="${pSrc(p)}" /></div>`
+      ).join('')
+      return `<div class="pg-row" style="height:${h.toFixed(1)}pt">${cells}</div>`
+    }
     const cells = row.map(p =>
-      `<div class="pg-cell" style="flex-grow:${photoAR(p).toFixed(4)}"><img src="${pSrc(p)}" /></div>`
+      `<div class="pg-cell" style="flex:none;width:${(TARGET_H * photoAR(p)).toFixed(1)}pt">${videoBadge(p)}<img src="${pSrc(p)}" /></div>`
     ).join('')
-    return `<div class="pg-row" style="height:${h.toFixed(1)}pt">${cells}</div>`
+    return `<div class="pg-row pg-row-fit" style="height:${TARGET_H}pt">${cells}</div>`
   }).join('')
 
   return `<div class="entry-photos entry-photos-grid">${rowsHtml}</div>`
@@ -197,6 +254,8 @@ function renderPhotoBlock(photos: JourneyPhoto[]): string {
 
 export function buildJourneyBookDocument(journey: JourneyDetail, options: JourneyBookRenderOptions = {}): JourneyBookDocument {
   const labels = labelsFor(options)
+  const settings: JourneyExportSettings = { ...DEFAULT_EXPORT_SETTINGS, ...options.settings }
+  const bodyClass = bodyClassesFor(settings)
   const entries = (journey.entries || []).filter(e => e.type !== 'skeleton')
   const allPhotos = entries.flatMap(e => e.photos || [])
   const coverUrl = journey.cover_image ? abs(`/uploads/${journey.cover_image}`) : (allPhotos[0] ? pSrc(allPhotos[0]) : '')
@@ -221,8 +280,8 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
         : ''
 
       const photoHtml = renderPhotoBlock(photos)
-      const prosconsHtml = renderProscons(entry)
-      const moodWeatherHtml = renderMoodWeather(entry)
+      const prosconsHtml = renderProscons(entry, labels)
+      const moodWeatherHtml = renderMoodWeather(entry, options.t)
       const storyHtml = entry.story ? `<div class="entry-story">${md(entry.story)}</div>` : ''
 
       // Photo-less entries use a text-focus layout (larger type, centred
@@ -268,7 +327,7 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
 
   /* ── Cover ─── */
   .cover-page {
-    width: 100%; height: 100vh; position: relative; overflow: hidden;
+    width: 100%; height: 210mm; position: relative; overflow: hidden;
     background: #0a0a0f; color: white; display: flex; align-items: center; justify-content: center;
     page-break-after: always;
   }
@@ -286,7 +345,7 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
 
   /* ── TOC ─── */
   .toc-page {
-    width: 100%; height: 100vh; padding: 48pt 64pt; display: flex; flex-direction: column;
+    width: 100%; height: 210mm; padding: 48pt 64pt; display: flex; flex-direction: column;
     background: white; page-break-after: always;
   }
   .toc-top-label { font-size: 9pt; font-weight: 700; letter-spacing: 5pt; text-transform: uppercase; color: #94a3b8; margin-bottom: 16pt; }
@@ -305,8 +364,11 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
   .toc-stat-label { font-size: 9pt; text-transform: uppercase; letter-spacing: 1pt; color: #94a3b8; }
 
   /* ── Entry Page ─── */
+  /* Sized in physical A4-landscape units (210mm tall) rather than viewport
+     units: 100vh depends on the print viewport and is unreliable across print
+     engines, whereas mm map directly to the paper. */
   .entry-page {
-    width: 100%; min-height: 100vh; padding: 44pt 48pt;
+    width: 100%; min-height: 210mm; padding: 44pt 48pt;
     page-break-after: always;
     /* clone the padding onto every page fragment, so when an entry flows onto a
        second sheet the continuation is inset from the paper edge instead of
@@ -333,14 +395,18 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
   /* Cells are square by default; only the four OUTER corners of the whole
      photo block are rounded (inner corners stay 90deg), matching the TREK
      gallery look. */
-  .pg-cell { flex-basis: 0; min-width: 0; border-radius: 0; overflow: hidden; background: #f4f4f5; }
+  .pg-cell { position: relative; flex-basis: 0; min-width: 0; border-radius: 0; overflow: hidden; background: #f4f4f5; }
+  .pg-row-fit { justify-content: flex-start; }
   .entry-photos-grid .pg-row:first-child .pg-cell:first-child { border-top-left-radius: 10pt; }
   .entry-photos-grid .pg-row:first-child .pg-cell:last-child { border-top-right-radius: 10pt; }
   .entry-photos-grid .pg-row:last-child .pg-cell:first-child { border-bottom-left-radius: 10pt; }
   .entry-photos-grid .pg-row:last-child .pg-cell:last-child { border-bottom-right-radius: 10pt; }
   .pg-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .pg-single { display: flex; justify-content: center; align-items: flex-start; }
+  .pg-single { position: relative; display: flex; justify-content: center; align-items: flex-start; }
   .pg-single img { max-width: 100%; max-height: 320pt; width: auto; height: auto; object-fit: contain; border-radius: 8pt; display: block; }
+  /* Play badge for video posters (a still frame stands in for the clip). */
+  .pg-play { position: absolute; top: 50%; left: 50%; width: 34pt; height: 34pt; transform: translate(-50%, -50%); border-radius: 50%; background: rgba(0,0,0,0.55); z-index: 1; }
+  .pg-play::before { content: ''; position: absolute; top: 50%; left: 54%; transform: translate(-50%, -50%); border-style: solid; border-width: 8pt 0 8pt 13pt; border-color: transparent transparent transparent #fff; }
 
   /* Entry content */
   .entry-content { flex: 0 0 auto; }
@@ -402,7 +468,7 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
 
   /* ── Closing ─── */
   .closing-page {
-    width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 210mm; display: flex; align-items: center; justify-content: center;
     background: #0a0a0f; color: white; text-align: center; page-break-after: auto;
   }
   .closing-title { font-size: 32pt; font-weight: 300; letter-spacing: -1pt; opacity: 0.6; margin-bottom: 8pt; }
@@ -447,7 +513,7 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
 
 </style>
 </head>
-<body class="continuous">
+<body class="${bodyClass}">
 
   <!-- Page 1: Cover -->
   <div class="cover-page">
@@ -481,5 +547,5 @@ export function buildJourneyBookDocument(journey: JourneyDetail, options: Journe
 </body>
 </html>`
 
-  return { html, estimatedPageCount }
+  return { html, estimatedPageCount, settings }
 }

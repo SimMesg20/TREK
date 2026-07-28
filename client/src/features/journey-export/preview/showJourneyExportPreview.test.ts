@@ -2,10 +2,19 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { showJourneyExportPreview } from './showJourneyExportPreview'
 import type { JourneyBookDocument } from '../render/buildJourneyBookDocument'
 
-function makeDocument(): JourneyBookDocument {
+function makeDocument(overrides: Partial<JourneyBookDocument> = {}): JourneyBookDocument {
   return {
-    html: '<!DOCTYPE html><html><body class="continuous"><h1>Preview</h1></body></html>',
+    html: '<!DOCTYPE html><html><body><h1>Preview</h1></body></html>',
     estimatedPageCount: 3,
+    settings: {
+      continuous: false,
+      showCoverInfo: true,
+      showBranding: true,
+      dimCover: true,
+      showProsCons: true,
+      showMoodWeather: true,
+    },
+    ...overrides,
   }
 }
 
@@ -70,5 +79,20 @@ describe('showJourneyExportPreview', () => {
     expect(overlay.querySelector('#journey-pdf-save')!.textContent).toBe('PDF speichern')
     expect(overlay.querySelector('#journey-pdf-close')!.textContent).toBe('Schließen')
     expect(overlay.querySelector<HTMLElement>('.jpdf-title')!.textContent).toContain('Seiten')
+  })
+
+  it('uses the supplied translated popover labels', () => {
+    const overlay = open({ labels: { options: 'Optionen', layout: 'Layout', continuous: 'Durchlopende Seite' } })
+
+    expect(overlay.querySelector('#journey-pdf-options')!.textContent).toContain('Optionen')
+    const continuousRow = overlay.querySelector('#journey-pdf-continuous')!.closest('.jpdf-row')!
+    expect(continuousRow.textContent).toContain('Durchlopende Seite')
+  })
+
+  it('initialises the toggles from the document export settings', () => {
+    const overlay = open()
+    // Paged A4 is the default, so continuous starts off; content toggles start on.
+    expect(overlay.querySelector<HTMLInputElement>('#journey-pdf-continuous')!.checked).toBe(false)
+    expect(overlay.querySelector<HTMLInputElement>('#journey-pdf-proscons')!.checked).toBe(true)
   })
 })

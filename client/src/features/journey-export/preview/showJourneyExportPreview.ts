@@ -1,11 +1,39 @@
 import type { JourneyBookDocument } from '../render/buildJourneyBookDocument'
 
+/** Translatable labels for the Options popover (defaults are English). */
+export interface JourneyExportPreviewLabels {
+  options: string
+  layout: string
+  cover: string
+  content: string
+  continuous: string
+  coverInfo: string
+  branding: string
+  dimCover: string
+  prosCons: string
+  moodWeather: string
+}
+
+const DEFAULT_LABELS: JourneyExportPreviewLabels = {
+  options: 'Options',
+  layout: 'Layout',
+  cover: 'Cover',
+  content: 'Content',
+  continuous: 'Continuous page',
+  coverInfo: 'Title & stats',
+  branding: 'Branding',
+  dimCover: 'Dim cover photo',
+  prosCons: 'Pros / cons',
+  moodWeather: 'Mood & weather',
+}
+
 interface JourneyExportPreviewOptions {
   title: string
   document: JourneyBookDocument
   saveLabel?: string
   closeLabel?: string
   pagesLabel?: string
+  labels?: Partial<JourneyExportPreviewLabels>
 }
 
 function esc(str: string): string {
@@ -17,6 +45,7 @@ function esc(str: string): string {
  * document, with an "Options" popover that toggles layout/cover/content
  * visibility live (driven by body-class hooks in the rendered document) and a
  * Save action that sizes the print @page to the content in continuous mode.
+ * The toggles' initial state mirrors the document's resolved export settings.
  */
 export function showJourneyExportPreview({
   title,
@@ -24,7 +53,10 @@ export function showJourneyExportPreview({
   saveLabel = 'Save as PDF',
   closeLabel = 'Close',
   pagesLabel = 'pages',
+  labels: labelOverrides,
 }: JourneyExportPreviewOptions) {
+  const labels: JourneyExportPreviewLabels = { ...DEFAULT_LABELS, ...labelOverrides }
+  const settings = exportDocument.settings
   // Render in a fixed overlay + srcdoc iframe — same pattern as TripPDF.
   // This avoids window.open() which Safari iOS blocks in async callbacks
   // and window.close() which doesn't work reliably in standalone PWA mode.
@@ -74,9 +106,9 @@ export function showJourneyExportPreview({
   const card = document.createElement('div')
   card.className = 'jpdf-card'
 
-  const optionRow = (id: string, label: string, tip: string, checked = true) => `
-      <label class="jpdf-row" title="${tip}">
-        <span>${label}</span>
+  const optionRow = (id: string, label: string, checked: boolean) => `
+      <label class="jpdf-row" title="${esc(label)}">
+        <span>${esc(label)}</span>
         <span class="jpdf-switch"><input id="${id}" type="checkbox" ${checked ? 'checked' : ''} /><span class="jpdf-slider"></span></span>
       </label>`
 
@@ -85,7 +117,7 @@ export function showJourneyExportPreview({
   header.innerHTML = `
     <span class="jpdf-title">${esc(title)} &middot; ${exportDocument.estimatedPageCount} ${esc(pagesLabel)}</span>
     <div class="jpdf-actions">
-      <button id="journey-pdf-options" class="jpdf-btn jpdf-btn-ghost" aria-haspopup="true" aria-expanded="false">&#9881;&#65039; Options</button>
+      <button id="journey-pdf-options" class="jpdf-btn jpdf-btn-ghost" aria-haspopup="true" aria-expanded="false">&#9881;&#65039; ${esc(labels.options)}</button>
       <button id="journey-pdf-save" class="jpdf-btn jpdf-btn-primary">${esc(saveLabel)}</button>
       <button id="journey-pdf-close" class="jpdf-btn jpdf-btn-ghost">${esc(closeLabel)}</button>
     </div>
@@ -97,19 +129,19 @@ export function showJourneyExportPreview({
   panel.hidden = true
   panel.innerHTML = `
     <div class="jpdf-group">
-      <div class="jpdf-group-label">Layout</div>
-      ${optionRow('journey-pdf-continuous', 'Continuous page', 'On: one long continuous page, ideal for viewing on screen. Off: separate A4 pages, ideal for printing.')}
+      <div class="jpdf-group-label">${esc(labels.layout)}</div>
+      ${optionRow('journey-pdf-continuous', labels.continuous, settings.continuous)}
     </div>
     <div class="jpdf-group">
-      <div class="jpdf-group-label">Cover</div>
-      ${optionRow('journey-pdf-coverinfo', 'Title &amp; stats', 'Show or hide the title, subtitle and the Days / Entries / Photos stat tiles on the cover.')}
-      ${optionRow('journey-pdf-branding', 'Branding', 'Show or hide the &#39;Journey Book&#39; label and the &#39;Made with TREK&#39; footer.')}
-      ${optionRow('journey-pdf-dim', 'Dim cover photo', 'Dim the cover photo so the text stays readable. Off = a lighter overlay so the hero photo shows through more.')}
+      <div class="jpdf-group-label">${esc(labels.cover)}</div>
+      ${optionRow('journey-pdf-coverinfo', labels.coverInfo, settings.showCoverInfo)}
+      ${optionRow('journey-pdf-branding', labels.branding, settings.showBranding)}
+      ${optionRow('journey-pdf-dim', labels.dimCover, settings.dimCover)}
     </div>
     <div class="jpdf-group">
-      <div class="jpdf-group-label">Content</div>
-      ${optionRow('journey-pdf-proscons', 'Pros / cons', 'Show or hide the pros/cons (Loved it / Could be better) cards.')}
-      ${optionRow('journey-pdf-moodweather', 'Mood &amp; weather', 'Show or hide the mood and weather chips.')}
+      <div class="jpdf-group-label">${esc(labels.content)}</div>
+      ${optionRow('journey-pdf-proscons', labels.prosCons, settings.showProsCons)}
+      ${optionRow('journey-pdf-moodweather', labels.moodWeather, settings.showMoodWeather)}
     </div>
   `
 
